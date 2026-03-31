@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { useBusiness } from './useBusiness';
 
-const FUNCTION_URL = 'https://qkbibprgxcmlgysptbha.supabase.co/functions/v1/google-oauth';
+const FUNCTION_URL = 'https://qkbibprgxcmlgysptbhha.supabase.co/functions/v1/google-oauth';
 
 // ✅ FIXED: Use /auth/callback — this matches Google Console registered URI
 const getRedirectUri = () =>

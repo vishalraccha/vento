@@ -1,0 +1,39 @@
+{
+  "name": "Vento",
+  "short_name": "Vento",
+  "description": "Professional invoice and quotation management for small businesses",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F8FAFC",
+  "theme_color": "#2563EB",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/vento-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/vento-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "finance", "productivity"],
+  "shortcuts": [
+    {
+      "name": "New Invoice",
+      "short_name": "Invoice",
+      "url": "/invoices/new",
+      "icons": [{ "src": "/shortcut-invoice.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "New Quotation",
+      "short_name": "Quote",
+      "url": "/quotations/new",
+      "icons": [{ "src": "/shortcut-quote.png", "sizes": "96x96" }]
+    }
+  ]
+}

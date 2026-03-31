@@ -3,8 +3,18 @@ import { serve } from "https://deno.land/std/http/server.ts";
 const CLIENT_ID = Deno.env.get("GOOGLE_CLIENT_ID")!;
 const CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET")!;
 const REDIRECT_URI = "https://qkbibprgxcmlgyspthha.supabase.co/functions/v1/google-oauth";
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
 
 serve(async (req) => {
+
+  // ✅ HANDLE PREFLIGHT (MOST IMPORTANT)
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
 
@@ -21,7 +31,7 @@ serve(async (req) => {
     return Response.redirect(authUrl);
   }
 
-  // STEP 2: Exchange code for token
+  // STEP 2: Exchange token
   const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -36,7 +46,10 @@ serve(async (req) => {
 
   const tokens = await tokenRes.json();
 
-  return Response.redirect(
-  `https://vento-three.vercel.app/dashboard?access_token=${tokens.access_token}`
-);
+  return new Response(JSON.stringify(tokens), {
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "application/json",
+    },
+  });
 });

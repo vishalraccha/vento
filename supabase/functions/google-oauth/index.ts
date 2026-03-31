@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std/http/server.ts";
 
 const CLIENT_ID = Deno.env.get("GOOGLE_CLIENT_ID")!;
 const CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET")!;
-const REDIRECT_URI = "https://YOUR_PROJECT_ID.supabase.co/functions/v1/google-oauth";
+const REDIRECT_URI = "https://qkbibprgxcmlgyspthha.supabase.co/functions/v1/google-oauth";
 
 serve(async (req) => {
   const url = new URL(req.url);
@@ -36,7 +36,7 @@ serve(async (req) => {
 
   const tokens = await tokenRes.json();
 
-  return new Response(JSON.stringify(tokens), {
-    headers: { "Content-Type": "application/json" },
-  });
+  return Response.redirect(
+  `https://vento-three.vercel.app/dashboard?access_token=${tokens.access_token}`
+);
 });

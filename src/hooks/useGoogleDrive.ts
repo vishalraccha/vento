@@ -4,10 +4,11 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { useBusiness } from './useBusiness';
 
-const FUNCTION_URL = 'https://qkbibprgxcmlgyspthha.supabase.co/functions/v1/google-drive';
+const FUNCTION_URL = 'https://qkbibprgxcmlgysptbha.supabase.co/functions/v1/google-oauth';
 
 // ✅ FIXED: Use /auth/callback — this matches Google Console registered URI
-const getRedirectUri = () => `${window.location.origin}/auth/callback`;
+const getRedirectUri = () =>
+  "https://qkbibprgxcmlgyspthha.supabase.co/functions/v1/google-oauth";
 
 function getUploadedFiles(): Set<string> {
   try {

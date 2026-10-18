@@ -525,12 +525,12 @@ export default function BusinessSetup() {
 
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">Default Notes</CardTitle>
-                <CardDescription>Additional notes for invoices</CardDescription>
+                <CardTitle className="text-base">Default Warranty & Disclaimers</CardTitle>
+                <CardDescription>Appears in the Warranty & Disclaimers section on your invoices</CardDescription>
               </CardHeader>
               <CardContent>
                 <Textarea 
-                  placeholder="Enter your default notes..."
+                  placeholder="New products carry the manufacturer's warranty. This warranty is strictly void if the item is physically damaged, burned, or tampered with after delivery."
                   value={formData.default_notes}
                   onChange={(e) => handleInputChange('default_notes', e.target.value)}
                   rows={3}

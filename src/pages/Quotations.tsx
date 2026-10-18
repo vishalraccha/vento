@@ -13,6 +13,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { QuotationDocumentView } from '@/components/documents/QuotationDocumentView';
 import { 
   Search, 
   Plus, 
@@ -70,6 +72,7 @@ export default function Quotations() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [convertingId, setConvertingId] = useState<string | null>(null);
+  const [previewQuotation, setPreviewQuotation] = useState<any | null>(null);
 
   const filteredQuotations = (quotations || []).filter(quotation => {
     if (!quotation) return false;
@@ -243,9 +246,16 @@ export default function Quotations() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleViewPDF(quotation.id)}>
+                          <DropdownMenuItem onClick={() => {
+                            const q = quotationsWithItems.find(item => item.id === quotation.id) || quotation;
+                            setPreviewQuotation(q);
+                          }}>
                             <Eye className="mr-2 h-4 w-4" />
-                            View PDF
+                            Preview Document
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleViewPDF(quotation.id)}>
+                            <Eye className="mr-2 h-4 w-4 text-muted-foreground" />
+                            View Raw PDF
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => handleDownloadPDF(quotation.id)}>
                             <Download className="mr-2 h-4 w-4" />
@@ -292,6 +302,29 @@ export default function Quotations() {
           label="New Quote"
           onClick={() => navigate('/quotations/new')}
         />
+
+        {/* Quotation Preview Modal */}
+        <Dialog open={!!previewQuotation} onOpenChange={(open) => !open && setPreviewQuotation(null)}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
+            <DialogHeader className="flex flex-row items-center justify-between pb-2 border-b">
+              <DialogTitle>Quotation Preview</DialogTitle>
+              <div className="flex gap-2 mr-6">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => previewQuotation && handleDownloadPDF(previewQuotation.id)}
+                >
+                  <Download className="mr-2 h-4 w-4" /> Download PDF
+                </Button>
+              </div>
+            </DialogHeader>
+            {previewQuotation && (
+              <div className="pt-2">
+                <QuotationDocumentView quotation={previewQuotation} business={business} />
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </AppLayout>
   );

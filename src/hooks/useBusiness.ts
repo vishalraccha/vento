@@ -17,13 +17,15 @@ export function useBusiness() {
     queryKey: ['businesses', user?.id],
     queryFn: async () => {
       if (!user) return null;
-      let { data, error } = await supabase
+      const { data: initialData, error } = await supabase
         .from('businesses')
         .select('*')
         .eq('user_id', user.id)
         .maybeSingle();
       
       if (error) throw error;
+
+      let data = initialData;
 
       // Auto-provision a business profile row if one doesn't exist yet
       if (!data) {

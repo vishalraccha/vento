@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { InvoiceDocumentView } from '@/components/documents/InvoiceDocumentView';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -209,196 +211,214 @@ const handleViewPDF = async () => {
 
         {/* Invoice Content */}
         <div className="space-y-4 p-4">
-          {/* Invoice Header Card */}
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm text-muted-foreground">Invoice</p>
-                  <p className="text-xl font-bold">{invoice.invoice_number}</p>
-                </div>
-                <Badge variant={getStatusBadgeVariant(invoice.status)} className="capitalize">
-                  {invoice.status}
-                </Badge>
-              </div>
-              
-              <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <p className="text-muted-foreground">Invoice Date</p>
-                  <p className="font-medium">
-                    {formatSafeDate(invoice.invoice_date)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Due Date</p>
-                  <p className="font-medium">
-                    {invoice.due_date ? formatSafeDate(invoice.due_date) : 'Not set'}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <Tabs defaultValue="document" className="w-full">
+            <div className="flex items-center justify-between mb-4">
+              <TabsList className="grid grid-cols-2 w-[280px]">
+                <TabsTrigger value="document">Invoice Preview</TabsTrigger>
+                <TabsTrigger value="summary">Summary</TabsTrigger>
+              </TabsList>
+              <Badge variant={getStatusBadgeVariant(invoice.status)} className="capitalize">
+                {invoice.status}
+              </Badge>
+            </div>
 
-          {/* Client Info */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Bill To
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <p className="font-semibold">{invoice.client_name || 'No client'}</p>
-              
-              {invoice.client_address && (
-                <div className="flex items-start gap-2 text-sm text-muted-foreground">
-                  <MapPin className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>{invoice.client_address}</span>
-                </div>
-              )}
-              
-              {invoice.client_phone && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Phone className="h-4 w-4" />
-                  <span>{invoice.client_phone}</span>
-                </div>
-              )}
-              
-              {invoice.client_email && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Mail className="h-4 w-4" />
-                  <span>{invoice.client_email}</span>
-                </div>
-              )}
-              
-              {invoice.client_gstin && (
-                <p className="text-sm text-muted-foreground">
-                  GSTIN: {invoice.client_gstin}
-                </p>
-              )}
-            </CardContent>
-          </Card>
+            <TabsContent value="document" className="space-y-4 mt-0">
+              <InvoiceDocumentView invoice={invoice} business={business} />
+            </TabsContent>
 
-          {/* Line Items */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Items
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {invoice.items && invoice.items.length > 0 ? (
-                invoice.items.map((item, index) => {
-                  const hasTax = Number(invoice.tax_amount) > 0;
-                  const lineTotal = Number(item.quantity) * Number(item.unit_price);
-                  const displayAmount = hasTax ? Number(item.subtotal) || lineTotal : lineTotal;
-                  const displayRate = hasTax ? (displayAmount / Number(item.quantity)) : Number(item.unit_price);
+            <TabsContent value="summary" className="space-y-4 mt-0">
+              {/* Invoice Header Card */}
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Invoice</p>
+                      <p className="text-xl font-bold">{invoice.invoice_number}</p>
+                    </div>
+                    <Badge variant={getStatusBadgeVariant(invoice.status)} className="capitalize">
+                      {invoice.status}
+                    </Badge>
+                  </div>
+                  
+                  <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="text-muted-foreground">Invoice Date</p>
+                      <p className="font-medium">
+                        {formatSafeDate(invoice.invoice_date)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">Due Date</p>
+                      <p className="font-medium">
+                        {invoice.due_date ? formatSafeDate(invoice.due_date) : 'Not set'}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
 
-                  return (
-                    <div key={item.id || index} className="space-y-1">
-                      <div className="flex justify-between">
-                        <div>
-                          <p className="font-medium">{item.name}</p>
-                          {item.description && (
-                            <p className="text-sm text-muted-foreground">
-                              {item.description}
+              {/* Client Info */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Bill To
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <p className="font-semibold">{invoice.client_name || 'No client'}</p>
+                  
+                  {invoice.client_address && (
+                    <div className="flex items-start gap-2 text-sm text-muted-foreground">
+                      <MapPin className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>{invoice.client_address}</span>
+                    </div>
+                  )}
+                  
+                  {invoice.client_phone && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Phone className="h-4 w-4" />
+                      <span>{invoice.client_phone}</span>
+                    </div>
+                  )}
+                  
+                  {invoice.client_email && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Mail className="h-4 w-4" />
+                      <span>{invoice.client_email}</span>
+                    </div>
+                  )}
+                  
+                  {invoice.client_gstin && (
+                    <p className="text-sm text-muted-foreground">
+                      GSTIN: {invoice.client_gstin}
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Line Items */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Items
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {invoice.items && invoice.items.length > 0 ? (
+                    invoice.items.map((item, index) => {
+                      const hasTax = Number(invoice.tax_amount) > 0;
+                      const lineTotal = Number(item.quantity) * Number(item.unit_price);
+                      const displayAmount = hasTax ? Number(item.subtotal) || lineTotal : lineTotal;
+                      const displayRate = hasTax ? (displayAmount / Number(item.quantity)) : Number(item.unit_price);
+
+                      return (
+                        <div key={item.id || index} className="space-y-1">
+                          <div className="flex justify-between">
+                            <div>
+                              <p className="font-medium">{item.name}</p>
+                              {item.description && (
+                                <p className="text-sm text-muted-foreground">
+                                  {item.description}
+                                </p>
+                              )}
+                            </div>
+                            <p className="font-medium">
+                              ₹{displayAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                             </p>
+                          </div>
+                          <p className="text-sm text-muted-foreground">
+                            {item.quantity} {item.unit} × ₹{displayRate.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          </p>
+                          {index < (invoice.items?.length || 0) - 1 && (
+                            <Separator className="mt-3" />
                           )}
                         </div>
-                        <p className="font-medium">
-                          ₹{displayAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                        </p>
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        {item.quantity} {item.unit} × ₹{displayRate.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </p>
-                      {index < (invoice.items?.length || 0) - 1 && (
-                        <Separator className="mt-3" />
-                      )}
-                    </div>
-                  );
-                })
-              ) : (
-                <p className="text-sm text-muted-foreground">No items</p>
-              )}
-            </CardContent>
-          </Card>
+                      );
+                    })
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No items</p>
+                  )}
+                </CardContent>
+              </Card>
 
-          {/* Totals */}
-          <Card>
-            <CardContent className="p-4">
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Subtotal</span>
-                  <span>₹{Number(invoice.subtotal).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                </div>
-                
-                {invoice.tax_amount > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Tax</span>
-                    <span>₹{Number(invoice.tax_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
-                  </div>
-                )}
-                
-                {invoice.discount_amount > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Discount</span>
-                    <span className="text-green-600">
-                      -₹{Number(invoice.discount_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                )}
-                
-                <Separator />
-                
-                <div className="flex justify-between font-semibold">
-                  <span>Total</span>
-                  <span className="text-lg">
-                    ₹{Number(invoice.total_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                  </span>
-                </div>
-                
-                {invoice.amount_paid > 0 && (
-                  <>
+              {/* Totals */}
+              <Card>
+                <CardContent className="p-4">
+                  <div className="space-y-2">
                     <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Paid</span>
-                      <span className="text-green-600">
-                        ₹{Number(invoice.amount_paid).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </span>
+                      <span className="text-muted-foreground">Subtotal</span>
+                      <span>₹{Number(invoice.subtotal).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
                     </div>
                     
-                    {Number(invoice.total_amount) - Number(invoice.amount_paid) > 0 && (
-                      <div className="flex justify-between font-medium text-destructive">
-                        <span>Balance Due</span>
-                        <span>
-                          ₹{(Number(invoice.total_amount) - Number(invoice.amount_paid)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    {invoice.tax_amount > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Tax</span>
+                        <span>₹{Number(invoice.tax_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    )}
+                    
+                    {invoice.discount_amount > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Discount</span>
+                        <span className="text-green-600">
+                          -₹{Number(invoice.discount_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                         </span>
                       </div>
                     )}
-                  </>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+                    
+                    <Separator />
+                    
+                    <div className="flex justify-between font-semibold">
+                      <span>Total</span>
+                      <span className="text-lg">
+                        ₹{Number(invoice.total_amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    
+                    {invoice.amount_paid > 0 && (
+                      <>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">Paid</span>
+                          <span className="text-green-600">
+                            ₹{Number(invoice.amount_paid).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        
+                        {Number(invoice.total_amount) - Number(invoice.amount_paid) > 0 && (
+                          <div className="flex justify-between font-medium text-destructive">
+                            <span>Balance Due</span>
+                            <span>
+                              ₹{(Number(invoice.total_amount) - Number(invoice.amount_paid)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
 
-          {/* Notes & Terms */}
-          {(invoice.notes || invoice.terms) && (
-            <Card>
-              <CardContent className="space-y-4 p-4">
-                {invoice.notes && (
-                  <div>
-                    <p className="mb-1 text-sm font-medium text-muted-foreground">Notes</p>
-                    <p className="text-sm">{invoice.notes}</p>
-                  </div>
-                )}
-                {invoice.terms && (
-                  <div>
-                    <p className="mb-1 text-sm font-medium text-muted-foreground">Terms & Conditions</p>
-                    <p className="text-sm">{invoice.terms}</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
+              {/* Notes & Terms */}
+              {(invoice.notes || invoice.terms) && (
+                <Card>
+                  <CardContent className="space-y-4 p-4">
+                    {invoice.notes && (
+                      <div>
+                        <p className="mb-1 text-sm font-medium text-muted-foreground">Warranty and Disclaimers</p>
+                        <p className="text-sm">{invoice.notes}</p>
+                      </div>
+                    )}
+                    {invoice.terms && (
+                      <div>
+                        <p className="mb-1 text-sm font-medium text-muted-foreground">Term and Conditions</p>
+                        <p className="text-sm">{invoice.terms}</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+            </TabsContent>
+          </Tabs>
 
           {/* Quick Actions */}
           <div className="flex gap-3 pb-4">

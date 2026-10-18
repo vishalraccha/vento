@@ -66,9 +66,10 @@ export default function NewQuotation() {
   const [quotationDate, setQuotationDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [validUntil, setValidUntil] = useState(format(addDays(new Date(), 30), 'yyyy-MM-dd'));
   const [notes, setNotes] = useState('');
+  const [warranty, setWarranty] = useState('');
   const [terms, setTerms] = useState('');
-  const [showTaxBreakdown, setShowTaxBreakdown] = useState(false);
-  const [taxRate, setTaxRate] = useState('');
+  const [taxRate, setTaxRate] = useState('10');
+  const [discountAmount, setDiscountAmount] = useState('0');
   const [lineItems, setLineItems] = useState<LineItem[]>([emptyLineItem()]);
 
   // Full-screen success confirmation state
@@ -117,16 +118,27 @@ export default function NewQuotation() {
       setSelectedClientId('');
       setQuotationDate(format(new Date(), 'yyyy-MM-dd'));
       setValidUntil(format(addDays(new Date(), 30), 'yyyy-MM-dd'));
-      setNotes(business?.default_notes || '');
-      setTerms(business?.default_terms || '');
-      setShowTaxBreakdown(false);
-      setTaxRate('');
+      setNotes('');
+      setWarranty("New products carry the manufacturer's warranty. This warranty is strictly void if the item is physically damaged, burned, or tampered with after delivery.");
+      setTerms("Please send payment within 30 days of receiving this invoice. There will be 10% interest charge per month on late invoice.");
+      setTaxRate('10');
+      setDiscountAmount('0');
     }
   };
 
   useEffect(() => {
-    if (!isEditing && business?.default_terms) setTerms(business.default_terms);
-    if (!isEditing && business?.default_notes) setNotes(business.default_notes);
+    if (!isEditing) {
+      if (business?.default_terms) {
+        setTerms(business.default_terms);
+      } else {
+        setTerms("Please send payment within 30 days of receiving this invoice. There will be 10% interest charge per month on late invoice.");
+      }
+      if (business?.default_notes) {
+        setWarranty(business.default_notes);
+      } else {
+        setWarranty("New products carry the manufacturer's warranty. This warranty is strictly void if the item is physically damaged, burned, or tampered with after delivery.");
+      }
+    }
   }, [business, isEditing]);
 
   useEffect(() => {
@@ -135,7 +147,9 @@ export default function NewQuotation() {
       setQuotationDate(existingQuotation.quotation_date || format(new Date(), 'yyyy-MM-dd'));
       setValidUntil(existingQuotation.valid_until || format(addDays(new Date(), 30), 'yyyy-MM-dd'));
       setNotes(existingQuotation.notes || '');
+      setWarranty(existingQuotation.notes || '');
       setTerms(existingQuotation.terms || '');
+      setDiscountAmount(String(existingQuotation.discount_amount || 0));
 
       if (existingQuotation.items && existingQuotation.items.length > 0) {
         setLineItems(existingQuotation.items.map(item => ({
@@ -149,38 +163,28 @@ export default function NewQuotation() {
         })));
 
         const firstTax = existingQuotation.items[0]?.tax_rate;
-        if (firstTax && firstTax > 0) {
-          setShowTaxBreakdown(true);
-          setTaxRate(String(firstTax / 2));
+        if (firstTax !== undefined && firstTax !== null) {
+          setTaxRate(String(firstTax));
         }
       }
     }
   }, [existingQuotation]);
 
   const calculateTotals = () => {
-    let total = 0;
+    let subtotal = 0;
     lineItems.forEach(item => {
-      total += item.quantity * item.unit_price;
+      subtotal += item.quantity * item.unit_price;
     });
 
     const rate = parseFloat(taxRate) || 0;
-    const combinedRate = showTaxBreakdown ? rate * 2 : 0;
-    let taxAmount = 0;
-    let sgstAmount = 0;
-    let cgstAmount = 0;
-    let subtotal = total;
+    const taxAmount = (subtotal * rate) / 100;
+    const discount = parseFloat(discountAmount) || 0;
+    const total = Math.max(0, subtotal + taxAmount - discount);
 
-    if (showTaxBreakdown && combinedRate > 0) {
-      subtotal = total / (1 + combinedRate / 100);
-      taxAmount = total - subtotal;
-      sgstAmount = taxAmount / 2;
-      cgstAmount = taxAmount / 2;
-    }
-
-    return { subtotal, sgstAmount, cgstAmount, taxAmount, total, rate };
+    return { subtotal, taxAmount, total, rate, discount };
   };
 
-  const { subtotal, sgstAmount, cgstAmount, taxAmount, total, rate } = calculateTotals();
+  const { subtotal, taxAmount, total, rate, discount } = calculateTotals();
 
   const handleAddLineItem = () => {
     setLineItems([...lineItems, emptyLineItem()]);
@@ -244,9 +248,7 @@ export default function NewQuotation() {
     try {
       const formattedItems = validLineItems.map((item, index) => {
         const itemTotal = item.quantity * item.unit_price;
-        const combinedRate = showTaxBreakdown ? rate * 2 : 0;
-        const itemSubtotal = combinedRate > 0 ? itemTotal / (1 + combinedRate / 100) : itemTotal;
-        const itemTax = itemTotal - itemSubtotal;
+        const itemTax = (itemTotal * rate) / 100;
 
         return {
           name: item.name,
@@ -255,9 +257,9 @@ export default function NewQuotation() {
           quantity: item.quantity,
           unit: item.unit || null,
           unit_price: item.unit_price,
-          tax_rate: combinedRate,
+          tax_rate: rate,
           tax_amount: itemTax,
-          subtotal: itemSubtotal,
+          subtotal: itemTotal,
           total: itemTotal,
           sort_order: index,
           inventory_item_id: item.inventory_item_id,
@@ -283,9 +285,9 @@ export default function NewQuotation() {
             client_gstin: selectedClient?.gstin || (existingQuotation?.client_gstin ?? null),
             subtotal,
             tax_amount: taxAmount,
-            discount_amount: 0,
+            discount_amount: discount,
             total_amount: total,
-            notes: notes || null,
+            notes: warranty || notes || null,
             terms: terms || null,
           },
           items: formattedItems,
@@ -314,9 +316,9 @@ export default function NewQuotation() {
             client_gstin: selectedClient?.gstin || null,
             subtotal,
             tax_amount: taxAmount,
-            discount_amount: 0,
+            discount_amount: discount,
             total_amount: total,
-            notes: notes || null,
+            notes: warranty || notes || null,
             terms: terms || null,
             status: 'draft',
             converted_invoice_id: null,
@@ -805,96 +807,108 @@ export default function NewQuotation() {
             </CardContent>
           </Card>
 
-          {/* Tax Settings */}
+          {/* Tax & Discount */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Tax (GST)</CardTitle>
+              <CardTitle className="text-base">Tax & Discount</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label htmlFor="tax_toggle">Include GST</Label>
-                  <p className="text-xs text-muted-foreground">Applies CGST + SGST</p>
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <Label htmlFor="tax_rate">Tax Rate (%)</Label>
+                  <span className="text-xs text-muted-foreground">{rate > 0 ? `+ ₹${taxAmount.toFixed(2)}` : 'No Tax'}</span>
                 </div>
-                <Switch
-                  id="tax_toggle"
-                  checked={showTaxBreakdown}
-                  onCheckedChange={setShowTaxBreakdown}
-                />
-              </div>
-
-              {showTaxBreakdown && (
-                <div className="space-y-2">
-                  <Label htmlFor="tax_rate">Tax Rate per component (%) - e.g. 9 for 18% total</Label>
+                <div className="flex items-center gap-2">
                   <Input
                     id="tax_rate"
                     type="number"
                     step="0.5"
-                    placeholder="9"
+                    min="0"
+                    placeholder="10"
                     value={taxRate}
                     onChange={(e) => setTaxRate(e.target.value)}
                   />
+                  <div className="flex gap-1">
+                    {[0, 5, 10, 18].map((pct) => (
+                      <Button
+                        key={pct}
+                        type="button"
+                        variant={Number(taxRate) === pct ? 'default' : 'outline'}
+                        size="sm"
+                        className="h-9 px-2.5 text-xs"
+                        onClick={() => setTaxRate(String(pct))}
+                      >
+                        {pct}%
+                      </Button>
+                    ))}
+                  </div>
                 </div>
-              )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="discount">Discount (₹)</Label>
+                <Input
+                  id="discount"
+                  type="number"
+                  step="1"
+                  min="0"
+                  placeholder="0"
+                  value={discountAmount}
+                  onChange={(e) => setDiscountAmount(e.target.value)}
+                />
+              </div>
             </CardContent>
           </Card>
 
           {/* Totals Summary */}
           <Card className="border-primary/20 bg-primary/5">
-            <CardContent className="p-4">
-              <div className="space-y-2">
-                {showTaxBreakdown && rate > 0 ? (
-                  <>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Subtotal (excl. tax)</span>
-                      <span>₹{subtotal.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">SGST ({rate}%)</span>
-                      <span>₹{sgstAmount.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">CGST ({rate}%)</span>
-                      <span>₹{cgstAmount.toFixed(2)}</span>
-                    </div>
-                  </>
-                ) : null}
-                <div className="flex justify-between border-t pt-2 text-lg font-semibold">
-                  <span>Total</span>
-                  <span>₹{total.toFixed(2)}</span>
+            <CardContent className="space-y-2.5 p-4 text-sm">
+              <div className="flex justify-between">
+                <span className="font-medium">Sub Total:</span>
+                <span className="font-semibold">₹{subtotal.toFixed(2)}</span>
+              </div>
+              {rate > 0 && (
+                <div className="flex justify-between text-muted-foreground">
+                  <span>Tax ({rate}%):</span>
+                  <span>+₹{taxAmount.toFixed(2)}</span>
                 </div>
+              )}
+              {discount > 0 && (
+                <div className="flex justify-between text-emerald-600 font-medium">
+                  <span>Discount:</span>
+                  <span>-₹{discount.toFixed(2)}</span>
+                </div>
+              )}
+              <div className="flex justify-between border-t border-primary/20 pt-2.5 text-base font-extrabold text-foreground">
+                <span>Grand Total:</span>
+                <span className="text-lg">₹{total.toFixed(2)}</span>
               </div>
             </CardContent>
           </Card>
 
-          {/* Notes & Terms */}
+          {/* Terms & Warranty */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Notes &amp; Terms</CardTitle>
+              <CardTitle className="text-base">Terms & Warranty</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="notes">Notes</Label>
-                <Textarea
-                  id="notes"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Additional notes for the client..."
-                  rows={2}
-                />
-              </div>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="terms">Terms &amp; Conditions</Label>
-                  {business?.default_terms && (
-                    <span className="text-xs text-muted-foreground">From business profile</span>
-                  )}
-                </div>
+                <Label htmlFor="terms">Term and Conditions</Label>
                 <Textarea
                   id="terms"
                   value={terms}
                   onChange={(e) => setTerms(e.target.value)}
-                  placeholder="Quotation terms and conditions..."
+                  placeholder="Please send payment within 30 days..."
+                  rows={2}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="warranty">Warranty and Disclaimers</Label>
+                <Textarea
+                  id="warranty"
+                  value={warranty}
+                  onChange={(e) => setWarranty(e.target.value)}
+                  placeholder="New products carry the manufacturer's warranty..."
                   rows={2}
                 />
               </div>

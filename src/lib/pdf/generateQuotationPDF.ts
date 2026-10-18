@@ -2,363 +2,377 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { format } from 'date-fns';
 import { Quotation, QuotationItem, Business } from '@/types/database';
+import {
+  DEFAULT_INVOICE_TERMS,
+  DEFAULT_INVOICE_WARRANTY,
+  DEFAULT_SIGNATORY_NAME,
+  DEFAULT_SIGNATORY_ROLE,
+  DEFAULT_SIGNATURE_TEXT,
+  generatePaymentQRCode,
+  formatCurrency,
+} from './invoiceTemplateConstants';
 
 interface GenerateQuotationPDFParams {
   quotation: Quotation & { items?: QuotationItem[] };
   business: Business | null;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatAmount(amount: number): string {
-  return `${Number(amount).toLocaleString('en-IN', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  })}/-`;
-}
-
-async function loadImageAsBase64(url: string): Promise<string | null> {
-  try {
-    const response = await fetch(url);
-    const blob = await response.blob();
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(blob);
-    });
-  } catch {
-    return null;
-  }
-}
-
-function drawWatermark(
-  doc: jsPDF,
-  pageWidth: number,
-  pageHeight: number,
-  logoBase64: string | null,
-  initials: string
-) {
-  const centerX = pageWidth / 2;
-  const centerY = pageHeight / 2;
-  const size = 120;
-
-  doc.saveGraphicsState();
-  (doc as any).setGState(new (doc as any).GState({ opacity: 0.07 }));
-
-  if (logoBase64) {
-    try {
-      doc.addImage(logoBase64, 'PNG', centerX - size / 2, centerY - size / 2, size, size);
-    } catch { /* skip on error */ }
-  } else {
-    doc.setFont('times', 'bold');
-    doc.setFontSize(80);
-    doc.setTextColor(180, 180, 180);
-    doc.text(initials, centerX, centerY, { align: 'center' });
-  }
-
-  doc.restoreGraphicsState();
-  doc.setTextColor(0, 0, 0);
-}
-
-// ─── Main generator ───────────────────────────────────────────────────────────
-
 export async function generateQuotationPDF({
   quotation,
   business,
 }: GenerateQuotationPDFParams): Promise<jsPDF> {
-  const doc        = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const pageWidth  = doc.internal.pageSize.getWidth();
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  const margin     = 14;
+  const margin = 14;
 
-  const businessName = (business?.business_name || 'Your Business').toUpperCase();
-  const initials     = businessName
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w[0])
-    .join('');
+  const currency = business?.currency || 'INR';
+  const businessName = (business?.business_name || 'MOHAN ELECTRONICS').toUpperCase();
+  const address = business?.business_address
+    ? `${business.business_address}${business.city ? `, ${business.city}` : ''}${business.pincode ? `, ${business.pincode}` : ''}`
+    : '1024 ASHOCK CHOWK, SOLAPUR, 413006';
+  const gstin = business?.gstin || '112VJH3242JHJ23';
+  const phone = business?.phone_number || '9370426583';
+  const email = business?.email || 'mohanelec@gmail.com';
 
-  const logoBase64 = business?.logo_url
-    ? await loadImageAsBase64(business.logo_url)
+  const clientName = (quotation.client_name || 'KETUT SUSILO').toUpperCase();
+  const clientAddress = quotation.client_address || '123 Anywhere St., Any City, ST 12345';
+  const clientGstin = quotation.client_gstin || '112VJH3242JHJ23';
+
+  const quotationNumber = quotation.quotation_number || '12345';
+  const quotationDateFormatted = quotation.quotation_date
+    ? format(new Date(quotation.quotation_date), 'dd MMMM yyyy')
+    : format(new Date(), 'dd MMMM yyyy');
+
+  const validUntilFormatted = quotation.valid_until
+    ? format(new Date(quotation.valid_until), 'dd MMMM yyyy')
     : null;
 
-  // ── 1. WATERMARK ─────────────────────────────────────────────────────────
-  drawWatermark(doc, pageWidth, pageHeight, logoBase64, initials);
+  let yPos = 14;
 
-  // ── 2. HEADER ─────────────────────────────────────────────────────────────
-  let yPos    = 14;
-  const logoW = 22;
-  const logoH = 22;
-
-  if (logoBase64) {
+  // ── 1. HEADER ─────────────────────────────────────────────────────────────
+  if (business?.logo_url) {
     try {
-      doc.addImage(logoBase64, 'AUTO', margin, yPos, logoW, logoH);
-    } catch { /* skip */ }
+      const response = await fetch(business.logo_url);
+      const blob = await response.blob();
+      const base64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(blob);
+      });
+      doc.addImage(base64, 'AUTO', margin, yPos, 24, 24);
+    } catch {
+      drawDefaultLogo(doc, margin, yPos);
+    }
+  } else {
+    drawDefaultLogo(doc, margin, yPos);
   }
 
-  doc.setFont('times', 'bold');
-  doc.setFontSize(26);
-  doc.setTextColor(0, 0, 0);
-  doc.text(businessName, pageWidth / 2, yPos + 12, { align: 'center' });
+  // Left side: Dark grey accent bar + QUOTATION title
+  const barY = yPos + 22;
+  doc.setFillColor(74, 74, 74);
+  doc.rect(margin, barY, 12, 6, 'F');
 
-  yPos += logoH + 4;
-
-  // ── 3. CONTACT LINE ───────────────────────────────────────────────────────
-  const contactParts: string[] = [];
-  if (business?.business_address) {
-    const cityState = [business.city, business.state, business.pincode].filter(Boolean).join(', ');
-    contactParts.push(business.business_address + (cityState ? `, ${cityState}` : ''));
-  }
-  if (business?.phone_number) contactParts.push(`Mob.: ${business.phone_number}`);
-  if (business?.email)        contactParts.push(`Email: ${business.email}`);
-
-  if (contactParts.length) {
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9.5);
-    doc.setTextColor(60, 60, 60);
-    doc.text(contactParts.join('   |   '), pageWidth / 2, yPos, { align: 'center' });
-    yPos += 5.5;
-  }
-
-  if (business?.gstin) {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
-    doc.setTextColor(0, 0, 0);
-    doc.text(`GST NO.: ${business.gstin}`, pageWidth / 2, yPos, { align: 'center' });
-    yPos += 5.5;
-  }
-
-  doc.setTextColor(0, 0, 0);
-  doc.setDrawColor(0, 0, 0);
-  doc.setLineWidth(0.5);
-  doc.line(margin, yPos, pageWidth - margin, yPos);
-  yPos += 6;
-
-  // ── 4. TITLE ──────────────────────────────────────────────────────────────
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(15);
-  doc.text('QUOTATION', pageWidth / 2, yPos, { align: 'center' });
-  yPos += 9;
+  doc.setFontSize(22);
+  doc.setTextColor(17, 24, 39);
+  doc.text('QUOTATION', margin + 15, barY + 5.2);
 
-  // ── 5. META ───────────────────────────────────────────────────────────────
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9.5);
-  doc.text(`Date: ${format(new Date(quotation.quotation_date), 'dd-MM-yyyy')}`, margin, yPos);
-  doc.text(`Quotation No.: ${quotation.quotation_number}`, pageWidth - margin, yPos, { align: 'right' });
-  yPos += 5.5;
+  // Right side: Company Information
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(18);
+  doc.setTextColor(55, 65, 81);
 
-  if (quotation.valid_until) {
-    doc.text(
-      `Valid Until: ${format(new Date(quotation.valid_until), 'dd-MM-yyyy')}`,
-      pageWidth - margin,
-      yPos,
-      { align: 'right' }
-    );
-    yPos += 5.5;
+  const nameParts = businessName.split(' ');
+  if (nameParts.length >= 2) {
+    doc.text(nameParts[0], pageWidth - margin, yPos + 6, { align: 'right' });
+    doc.text(nameParts.slice(1).join(' '), pageWidth - margin, yPos + 13, { align: 'right' });
+  } else {
+    doc.text(businessName, pageWidth - margin, yPos + 8, { align: 'right' });
   }
 
-  yPos += 4;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(75, 85, 99);
+  doc.text(`Add. : ${address}`, pageWidth - margin, yPos + 18.5, { align: 'right' });
+  doc.text(`GST No : ${gstin}`, pageWidth - margin, yPos + 22.5, { align: 'right' });
 
-  // ── 6. CLIENT BLOCK ───────────────────────────────────────────────────────
-  doc.setFont('times', 'bold');
-  doc.setFontSize(12);
-  doc.text('To,', margin, yPos);
-  yPos += 6;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(17, 24, 39);
+  doc.text(`Phone: ${phone}   |   Email: ${email}`, pageWidth - margin, yPos + 27, { align: 'right' });
 
+  yPos += 37;
+
+  // ── 2. BILL TO & METADATA ────────────────────────────────────────────────
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.setTextColor(17, 24, 39);
+  doc.text('To', margin, yPos);
+
+  yPos += 4.5;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
-  doc.text(quotation.client_name || '-', margin, yPos);
-  yPos += 6;
+  doc.text(clientName, margin, yPos);
+
+  yPos += 4.2;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(55, 65, 81);
+  doc.text(clientAddress, margin, yPos);
+
+  if (clientGstin) {
+    yPos += 4;
+    doc.text(`GST No : ${clientGstin}`, margin, yPos);
+  }
+
+  const metaRightX = pageWidth - margin;
+  const metaLabelX = pageWidth - margin - 35;
+  let metaY = yPos - 8.2;
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9.5);
+  doc.setTextColor(17, 24, 39);
+  doc.text('Quotation no :', metaLabelX, metaY);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.text(quotationNumber, metaRightX, metaY, { align: 'right' });
 
-  if (quotation.client_address) {
-    const addressLines = doc.splitTextToSize(quotation.client_address, 120) as string[];
-    doc.text(addressLines, margin, yPos);
-    yPos += addressLines.length * 5;
+  metaY += 5.5;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9.5);
+  doc.text('Date :', metaLabelX, metaY);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.text(quotationDateFormatted, metaRightX, metaY, { align: 'right' });
+
+  if (validUntilFormatted) {
+    metaY += 5.5;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
+    doc.text('Valid Until :', metaLabelX, metaY);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9.5);
+    doc.text(validUntilFormatted, metaRightX, metaY, { align: 'right' });
   }
 
-  if (quotation.client_phone) {
-    doc.text(`Phone: ${quotation.client_phone}`, margin, yPos);
-    yPos += 5;
+  yPos += 8;
+
+  // ── 3. ITEMS TABLE ───────────────────────────────────────────────────────
+  const rawItems = quotation.items && quotation.items.length > 0 ? quotation.items : [
+    { name: 'Consultation', description: '', quantity: 1, unit_price: 300, total: 300 },
+    { name: 'Project Draft', description: '', quantity: 1, unit_price: 2400, total: 2400 },
+    { name: 'Implementation', description: '', quantity: 1, unit_price: 2500, total: 2500 },
+    { name: 'Additional Supplies', description: '', quantity: 1, unit_price: 750, total: 750 },
+    { name: 'Monthly meeting', description: '', quantity: 1, unit_price: 2000, total: 2000 },
+  ];
+
+  const subtotal = Number(quotation.subtotal) || rawItems.reduce((acc, it) => acc + (Number(it.quantity) * Number(it.unit_price)), 0);
+  const taxAmount = Number(quotation.tax_amount) || 0;
+  const discountAmount = Number(quotation.discount_amount) || 0;
+  const grandTotal = Number(quotation.total_amount) || (subtotal + taxAmount - discountAmount);
+
+  let taxPercent = 0;
+  if (subtotal > 0 && taxAmount > 0) {
+    taxPercent = Math.round((taxAmount / subtotal) * 100);
+  } else if (quotation.items?.[0]?.tax_rate) {
+    taxPercent = Number(quotation.items[0].tax_rate);
+  } else if (business?.default_tax_rate && taxAmount > 0) {
+    taxPercent = Number(business.default_tax_rate);
   }
 
-  if (quotation.client_gstin) {
-    doc.text(`GST No.: ${quotation.client_gstin}`, margin, yPos);
-    yPos += 5;
-  }
-
-  yPos += 6;
-
-  // ── 7. ITEMS TABLE ────────────────────────────────────────────────────────
-  const items = quotation.items || [];
-
-  // FIX: Read item.total (set by NewQuotation as quantity * unit_price).
-  // Fallback: item.subtotal, then compute from parts.
-  const tableBody = items.map((item, index) => {
-    const quantity  = Number(item.quantity)   || 0;
-    const unitPrice = Number(item.unit_price) || 0;
-    const total     = Number(item.total)      || Number(item.subtotal) || (quantity * unitPrice);
-
-    const displayText = item.name?.trim()
-      ? item.name + (item.description ? `\n${item.description}` : '')
-      : '—';
+  const tableBody = rawItems.map((item, index) => {
+    const qty = Number(item.quantity) || 1;
+    const price = Number(item.unit_price) || 0;
+    const lineTotal = Number((item as any).total) || (qty * price);
+    const displayText = item.name + (item.description ? `\n${item.description}` : '');
 
     return [
       String(index + 1),
       displayText,
-      String(quantity),
-      formatAmount(unitPrice),
-      formatAmount(total),
+      String(qty),
+      formatCurrency(price, currency),
+      formatCurrency(lineTotal, currency),
     ];
   });
 
- autoTable(doc, {
-  startY: yPos,
-  head: [['No.', 'Item Description', 'Qty', 'Rate', 'Amount']],
-  body: tableBody,
-  theme: 'plain',
+  doc.setDrawColor(17, 24, 39);
+  doc.setLineWidth(0.5);
+  doc.line(margin, yPos, pageWidth - margin, yPos);
 
-  styles: {
-    font: 'helvetica',
-    fontSize: 10,
-    cellPadding: { top: 4, bottom: 4, left: 4, right: 4 },
-    lineColor: [200, 200, 200],
-    lineWidth: 0.3,
-    textColor: [0, 0, 0],
-    overflow: 'linebreak',
-    fillColor: false,
-  },
-
-  headStyles: {
-    fillColor: [30, 30, 30],
-    textColor: [255, 255, 255],
-    fontStyle: 'bold',
-    halign: 'center',
-    fontSize: 10,
-  },
-
-  alternateRowStyles: { fillColor: false },
-
-  bodyStyles: {
-    fillColor: false,        // ← transparent, watermark shows through
-    textColor: [0, 0, 0],   // ← force black text
-    lineColor: [200, 200, 200],
-    lineWidth: 0.3,
-  },
-
-  columnStyles: {
-    0: { cellWidth: 12,     halign: 'center' },
-    1: { cellWidth: 'auto' },
-    2: { cellWidth: 18,     halign: 'center' },
-    3: { cellWidth: 32,     halign: 'right' },
-    4: { cellWidth: 35,     halign: 'right' },
-  },
-});
+  autoTable(doc, {
+    startY: yPos,
+    head: [['NO', 'DESCRIPTION', 'QTY', 'PRICE', 'TOTAL']],
+    body: tableBody,
+    theme: 'plain',
+    styles: {
+      font: 'helvetica',
+      fontSize: 8.5,
+      cellPadding: { top: 3.5, bottom: 3.5, left: 2, right: 2 },
+      textColor: [17, 24, 39],
+      overflow: 'linebreak',
+    },
+    headStyles: {
+      fontStyle: 'bold',
+      fontSize: 9,
+      textColor: [17, 24, 39],
+      fillColor: false,
+      halign: 'left',
+    },
+    columnStyles: {
+      0: { cellWidth: 12, halign: 'left' },
+      1: { cellWidth: 'auto', halign: 'left' },
+      2: { cellWidth: 16, halign: 'center' },
+      3: { cellWidth: 30, halign: 'right' },
+      4: { cellWidth: 32, halign: 'right' },
+    },
+    didDrawCell: (data) => {
+      if (data.section === 'body' && data.row.index < tableBody.length - 1 && data.column.index === 4) {
+        const rowY = data.cell.y + data.cell.height;
+        doc.saveGraphicsState();
+        doc.setDrawColor(180, 180, 180);
+        doc.setLineWidth(0.2);
+        doc.setLineDashPattern([0.8, 1.2], 0);
+        doc.line(margin, rowY, pageWidth - margin, rowY);
+        doc.restoreGraphicsState();
+      }
+    },
+  });
 
   const finalY = (doc as any).lastAutoTable.finalY as number;
 
-  // ── 8. TOTALS ─────────────────────────────────────────────────────────────
-  const subtotal = Number(quotation.subtotal);
-  const totalTax = Number(quotation.tax_amount);
-  const totalAmt = Number(quotation.total_amount);
-  const discount = Number(quotation.discount_amount) || 0;
-  const hasTax   = totalTax > 0;
+  doc.setDrawColor(17, 24, 39);
+  doc.setLineWidth(0.5);
+  doc.line(margin, finalY, pageWidth - margin, finalY);
 
-  const labelX = pageWidth - margin - 70;
-  let totalsY  = finalY + 7;
+  // ── 4. SCAN TO PAY & TOTALS ──────────────────────────────────────────────
+  const belowTableY = finalY + 7;
 
-  doc.setFontSize(10);
-  doc.setTextColor(0, 0, 0);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.setTextColor(17, 24, 39);
+  doc.text('SCAN TO PAY', margin, belowTableY);
 
-  if (hasTax) {
-    const halfTax  = totalTax / 2;
-    const halfRate = subtotal > 0 ? (halfTax / subtotal) * 100 : 0;
+  const upiPayString = `upi://pay?pa=${phone}@upi&pn=${encodeURIComponent(businessName)}&am=${grandTotal}&cu=INR`;
+  const qrDataUrl = await generatePaymentQRCode(upiPayString);
+  doc.addImage(qrDataUrl, 'PNG', margin, belowTableY + 2.5, 26, 26);
 
-    doc.setFont('helvetica', 'normal');
-    doc.text('Sub-Total:', labelX, totalsY);
-    doc.text(formatAmount(subtotal), pageWidth - margin, totalsY, { align: 'right' });
-    totalsY += 5.5;
+  const sumLabelX = pageWidth - margin - 65;
+  const sumValX = pageWidth - margin;
+  let sumY = belowTableY + 1;
 
-    doc.text(`SGST @ ${halfRate.toFixed(1)}%:`, labelX, totalsY);
-    doc.text(formatAmount(halfTax), pageWidth - margin, totalsY, { align: 'right' });
-    totalsY += 5.5;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(17, 24, 39);
+  doc.text('Sub Total', sumLabelX, sumY);
+  doc.text(formatCurrency(subtotal, currency), sumValX, sumY, { align: 'right' });
 
-    doc.text(`CGST @ ${halfRate.toFixed(1)}%:`, labelX, totalsY);
-    doc.text(formatAmount(halfTax), pageWidth - margin, totalsY, { align: 'right' });
-    totalsY += 5.5;
+  if (taxPercent > 0) {
+    sumY += 5.5;
+    doc.text(`Tax ${taxPercent}%`, sumLabelX, sumY);
+    doc.text(formatCurrency(taxAmount, currency), sumValX, sumY, { align: 'right' });
   }
 
-  if (discount > 0) {
-    doc.setFont('helvetica', 'normal');
-    doc.text('Discount:', labelX, totalsY);
-    doc.text(`-${formatAmount(discount)}`, pageWidth - margin, totalsY, { align: 'right' });
-    totalsY += 5.5;
+  if (discountAmount > 0) {
+    sumY += 5.5;
+    doc.text('Discount', sumLabelX, sumY);
+    doc.text(`-${formatCurrency(discountAmount, currency)}`, sumValX, sumY, { align: 'right' });
   }
 
-  doc.setDrawColor(0, 0, 0);
-  doc.setLineWidth(0.4);
-  doc.line(labelX, totalsY, pageWidth - margin, totalsY);
-  totalsY += 4;
+  const blockY = sumY + 6;
+  const blockW = 75;
+  const blockH = 9;
+  const blockX = pageWidth - margin - blockW;
 
-  doc.setFont('times', 'bold');
-  doc.setFontSize(12);
-  doc.text('Total:', labelX, totalsY);
-  doc.text(formatAmount(totalAmt), pageWidth - margin, totalsY, { align: 'right' });
-  totalsY += 8;
+  doc.setFillColor(74, 74, 74);
+  doc.rect(blockX, blockY, blockW, blockH, 'F');
 
-  // ── 9. TERMS & CONDITIONS ─────────────────────────────────────────────────
-  let termsY = totalsY + 8;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.setTextColor(255, 255, 255);
+  doc.text('GRAND TOTAL', blockX + 4, blockY + 6);
+  doc.text(formatCurrency(grandTotal, currency), blockX + blockW - 4, blockY + 6, { align: 'right' });
 
-  if (quotation.notes || quotation.terms) {
-    doc.setFont('times', 'bold');
-    doc.setFontSize(11);
-    doc.setTextColor(0, 0, 0);
-    doc.text('Terms & Conditions:', margin, termsY);
-    termsY += 6;
+  // ── 5. TERMS, WARRANTY & SIGNATURE ───────────────────────────────────────
+  const termsY = Math.max(belowTableY + 33, blockY + 16);
 
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9.5);
+  const termsText = quotation.terms || business?.default_terms || DEFAULT_INVOICE_TERMS;
+  const warrantyText = quotation.notes || business?.default_notes || DEFAULT_INVOICE_WARRANTY;
 
-    if (quotation.notes) {
-      const lines = doc.splitTextToSize(quotation.notes, pageWidth - margin * 2) as string[];
-      doc.text(lines, margin, termsY);
-      termsY += lines.length * 4.8 + 2;
-    }
-
-    if (quotation.terms) {
-      const lines = doc.splitTextToSize(quotation.terms, pageWidth - margin * 2) as string[];
-      doc.text(lines, margin, termsY);
-      termsY += lines.length * 4.8;
-    }
-  }
-
-  // ── 10. FOOTER ────────────────────────────────────────────────────────────
-  const footerY = Math.max(termsY + 12, pageHeight - 28);
-
-  doc.setDrawColor(180, 180, 180);
-  doc.setLineWidth(0.3);
-  doc.line(margin, footerY - 4, pageWidth - margin, footerY - 4);
+  const leftColWidth = 110;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(17, 24, 39);
+  doc.text('Term and Conditions :', margin, termsY);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9.5);
-  doc.setTextColor(0, 0, 0);
-  doc.text('Thanking you,', margin, footerY);
+  doc.setFontSize(7.5);
+  doc.setTextColor(75, 85, 99);
+  const termLines = doc.splitTextToSize(termsText, leftColWidth) as string[];
+  doc.text(termLines, margin, termsY + 4);
+
+  const warrantyY = termsY + 5 + termLines.length * 3.5;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(17, 24, 39);
+  doc.text('Warranty and Disclaimers :', margin, warrantyY);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(75, 85, 99);
+  const warrantyLines = doc.splitTextToSize(warrantyText, leftColWidth) as string[];
+  doc.text(warrantyLines, margin, warrantyY + 4);
+
+  const sigX = pageWidth - margin - 22;
+  const sigY = termsY + 6;
+
+  doc.setFont('times', 'italic');
+  doc.setFontSize(16);
+  doc.setTextColor(100, 100, 100);
+  doc.text(DEFAULT_SIGNATURE_TEXT, sigX, sigY, { align: 'center' });
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
-  doc.text(businessName, margin, footerY + 6);
+  doc.setTextColor(17, 24, 39);
+  doc.text(DEFAULT_SIGNATORY_NAME, sigX, sigY + 6, { align: 'center' });
 
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9.5);
-  doc.text('Authorised Signatory', pageWidth - margin, footerY + 6, { align: 'right' });
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(59, 130, 246);
+  doc.text(DEFAULT_SIGNATORY_ROLE, sigX, sigY + 10.5, { align: 'center' });
+
+  // ── 6. FOOTER ────────────────────────────────────────────────────────────
+  const footerY = pageHeight - 16;
+
+  doc.setDrawColor(180, 180, 180);
+  doc.setLineWidth(0.3);
+  doc.line(margin, footerY - 5, pageWidth - margin, footerY - 5);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(55, 65, 81);
+  doc.text('[CCTV]   [DISH]   [AUDIO]   [TV]   [WI-FI]', margin, footerY + 2);
+
+  doc.setFont('times', 'italic');
+  doc.setFontSize(13);
+  doc.setTextColor(59, 130, 246);
+  doc.text('Thank You for your Business !', pageWidth - margin, footerY + 2, { align: 'right' });
 
   return doc;
 }
 
-// ─── Convenience wrappers ─────────────────────────────────────────────────────
+function drawDefaultLogo(doc: jsPDF, x: number, y: number) {
+  doc.saveGraphicsState();
+  doc.setDrawColor(17, 24, 39);
+  doc.setLineWidth(1.2);
+  doc.ellipse(x + 12, y + 10, 14, 7, 'S');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(18);
+  doc.setTextColor(17, 24, 39);
+  doc.text('ME', x + 5, y + 13);
+  doc.restoreGraphicsState();
+}
 
 export async function downloadQuotationPDF(params: GenerateQuotationPDFParams): Promise<void> {
   const doc = await generateQuotationPDF(params);

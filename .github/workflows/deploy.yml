@@ -20,6 +20,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -33,11 +34,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Run test suite
+        run: npm test
+
       - name: Build application
         env:
-          VITE_SUPABASE_PROJECT_ID: "fvhjvphazrpanoqmsqvv"
-          VITE_SUPABASE_PUBLISHABLE_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ2aGp2cGhhenJwYW5vcW1zcXZ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyMjQ4MjksImV4cCI6MjA4ODgwMDgyOX0.A9eu28EbxERdoUw1t-F3n_mjsO5TpOzoU7SCYT3696A"
-          VITE_SUPABASE_URL: "https://fvhjvphazrpanoqmsqvv.supabase.co"
+          VITE_SUPABASE_PROJECT_ID: ${{ secrets.VITE_SUPABASE_PROJECT_ID || 'fvhjvphazrpanoqmsqvv' }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://fvhjvphazrpanoqmsqvv.supabase.co' }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY }}
         run: npm run build
 
       - name: Setup Pages

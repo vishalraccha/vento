@@ -2,424 +2,386 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { format } from 'date-fns';
 import { Invoice, InvoiceItem, Business } from '@/types/database';
+import {
+  DEFAULT_INVOICE_TERMS,
+  DEFAULT_INVOICE_WARRANTY,
+  DEFAULT_SIGNATORY_NAME,
+  DEFAULT_SIGNATORY_ROLE,
+  DEFAULT_SIGNATURE_TEXT,
+  generatePaymentQRCode,
+  formatCurrency,
+} from './invoiceTemplateConstants';
 
 interface GenerateInvoicePDFParams {
   invoice: Invoice & { items?: InvoiceItem[] };
   business: Business | null;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatAmount(amount: number): string {
-  return `${Number(amount).toLocaleString('en-IN', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  })}/-`;
-}
-
-async function loadImageAsBase64(url: string): Promise<string | null> {
-  try {
-    const response = await fetch(url);
-    const blob = await response.blob();
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(blob);
-    });
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Draws a faint full-page watermark using the logo or business initials.
- * Must be called BEFORE any other content so it sits behind everything.
- */
-function drawWatermark(
-  doc: jsPDF,
-  pageWidth: number,
-  pageHeight: number,
-  logoBase64: string | null,
-  initials: string
-) {
-  const centerX = pageWidth / 2;
-  const centerY = pageHeight / 2;
-  const size = 120;
-
-  doc.saveGraphicsState();
-  (doc as any).setGState(new (doc as any).GState({ opacity: 0.07 }));
-
-  if (logoBase64) {
-    try {
-      doc.addImage(
-        logoBase64,
-        'PNG',
-        centerX - size / 2,
-        centerY - size / 2,
-        size,
-        size
-      );
-    } catch { /* skip on error */ }
-  } else {
-    doc.setFont('times', 'bold');
-    doc.setFontSize(80);
-    doc.setTextColor(180, 180, 180);
-    doc.text(initials, centerX, centerY, { align: 'center' });
-  }
-
-  doc.restoreGraphicsState();
-
-  // Always reset text color after watermark
-  doc.setTextColor(0, 0, 0);
-}
-
-// ─── Main generator ───────────────────────────────────────────────────────────
-
 export async function generateInvoicePDF({
   invoice,
   business,
 }: GenerateInvoicePDFParams): Promise<jsPDF> {
-  const doc        = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const pageWidth  = doc.internal.pageSize.getWidth();   // 210 mm
-  const pageHeight = doc.internal.pageSize.getHeight();  // 297 mm
-  const margin     = 14;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth(); // 210 mm
+  const pageHeight = doc.internal.pageSize.getHeight(); // 297 mm
+  const margin = 14;
+  const contentWidth = pageWidth - margin * 2;
 
-  const businessName = (business?.business_name || 'Your Business').toUpperCase();
-  const initials     = businessName
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w[0])
-    .join('');
+  const currency = business?.currency || 'INR';
+  const businessName = (business?.business_name || 'MOHAN ELECTRONICS').toUpperCase();
+  const address = business?.business_address
+    ? `${business.business_address}${business.city ? `, ${business.city}` : ''}${business.pincode ? `, ${business.pincode}` : ''}`
+    : '1024 ASHOCK CHOWK, SOLAPUR, 413006';
+  const gstin = business?.gstin || '112VJH3242JHJ23';
+  const phone = business?.phone_number || '9370426583';
+  const email = business?.email || 'mohanelec@gmail.com';
 
-  // Load logo once — reused for both watermark and header badge
-  const logoBase64 = business?.logo_url
-    ? await loadImageAsBase64(business.logo_url)
-    : null;
+  const clientName = (invoice.client_name || 'KETUT SUSILO').toUpperCase();
+  const clientAddress = invoice.client_address || '123 Anywhere St., Any City, ST 12345';
+  const clientGstin = invoice.client_gstin || '112VJH3242JHJ23';
 
-  // ── 1. WATERMARK — drawn first so all content renders on top ─────────────
-  drawWatermark(doc, pageWidth, pageHeight, logoBase64, initials);
+  const invoiceNumber = invoice.invoice_number || '12345';
+  const invoiceDateFormatted = invoice.invoice_date
+    ? format(new Date(invoice.invoice_date), 'dd MMMM yyyy')
+    : format(new Date(), 'dd MMMM yyyy');
 
-  // ── 2. HEADER: Logo badge (left) + Business name (centred) ───────────────
-  let yPos    = 14;
-  const logoW = 22;
-  const logoH = 22;
+  let yPos = 14;
 
-  if (logoBase64) {
+  // ── 1. HEADER ─────────────────────────────────────────────────────────────
+  // Left side: Logo & Title
+  if (business?.logo_url) {
     try {
-      doc.addImage(logoBase64, 'AUTO', margin, yPos, logoW, logoH);
-    } catch { /* skip logo on error */ }
+      const response = await fetch(business.logo_url);
+      const blob = await response.blob();
+      const base64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(blob);
+      });
+      doc.addImage(base64, 'AUTO', margin, yPos, 24, 24);
+    } catch {
+      drawDefaultLogo(doc, margin, yPos);
+    }
+  } else {
+    drawDefaultLogo(doc, margin, yPos);
   }
 
-  // Business name — always centred on the full page width
-  doc.setFont('times', 'bold');
-  doc.setFontSize(26);
-  doc.setTextColor(0, 0, 0);
-  doc.text(businessName, pageWidth / 2, yPos + 12, { align: 'center' });
+  // Left side: Dark grey accent bar + INVOICE title
+  const barY = yPos + 22;
+  doc.setFillColor(74, 74, 74);
+  doc.rect(margin, barY, 12, 6, 'F');
 
-  yPos += logoH + 4;
-
-  // ── 3. CONTACT LINE — centred, pipe-separated ────────────────────────────
-  const contactParts: string[] = [];
-  if (business?.business_address) {
-    const cityState = [business.city, business.state, business.pincode]
-      .filter(Boolean)
-      .join(', ');
-    contactParts.push(
-      business.business_address + (cityState ? `, ${cityState}` : '')
-    );
-  }
-  if (business?.phone_number) contactParts.push(`Mob.: ${business.phone_number}`);
-  if (business?.email)        contactParts.push(`Email: ${business.email}`);
-
-  if (contactParts.length) {
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9.5);
-    doc.setTextColor(60, 60, 60);
-    doc.text(contactParts.join('   |   '), pageWidth / 2, yPos, { align: 'center' });
-    yPos += 5.5;
-  }
-
-  if (business?.gstin) {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
-    doc.setTextColor(0, 0, 0);
-    doc.text(`GST NO.: ${business.gstin}`, pageWidth / 2, yPos, { align: 'center' });
-    yPos += 5.5;
-  }
-
-  // Reset text colour before drawing lines / body content
-  doc.setTextColor(0, 0, 0);
-
-  // Horizontal rule
-  doc.setDrawColor(0, 0, 0);
-  doc.setLineWidth(0.5);
-  doc.line(margin, yPos, pageWidth - margin, yPos);
-  yPos += 6;
-
-  // ── 4. DOCUMENT TITLE ─────────────────────────────────────────────────────
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(15);
-  doc.text('INVOICE', pageWidth / 2, yPos, { align: 'center' });
-  yPos += 9;
+  doc.setFontSize(22);
+  doc.setTextColor(17, 24, 39);
+  doc.text('INVOICE', margin + 15, barY + 5.2);
 
-  // ── 5. INVOICE META — date (left) | invoice number (right) ───────────────
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9.5);
-  doc.text(
-    `Date: ${format(new Date(invoice.invoice_date), 'dd-MM-yyyy')}`,
-    margin,
-    yPos
-  );
-  doc.text(
-    `Invoice No.: ${invoice.invoice_number}`,
-    pageWidth - margin,
-    yPos,
-    { align: 'right' }
-  );
-  yPos += 5.5;
+  // Right side: Company Information
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(18);
+  doc.setTextColor(55, 65, 81);
 
-  if (invoice.due_date) {
-    doc.text(
-      `Due Date: ${format(new Date(invoice.due_date), 'dd-MM-yyyy')}`,
-      pageWidth - margin,
-      yPos,
-      { align: 'right' }
-    );
-    yPos += 5.5;
+  const nameParts = businessName.split(' ');
+  if (nameParts.length >= 2) {
+    doc.text(nameParts[0], pageWidth - margin, yPos + 6, { align: 'right' });
+    doc.text(nameParts.slice(1).join(' '), pageWidth - margin, yPos + 13, { align: 'right' });
+  } else {
+    doc.text(businessName, pageWidth - margin, yPos + 8, { align: 'right' });
   }
 
-  yPos += 4;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(75, 85, 99);
+  doc.text(`Add. : ${address}`, pageWidth - margin, yPos + 18.5, { align: 'right' });
+  doc.text(`GST No : ${gstin}`, pageWidth - margin, yPos + 22.5, { align: 'right' });
 
-  // ── 6. CLIENT / "TO" BLOCK ────────────────────────────────────────────────
-  doc.setFont('times', 'bold');
-  doc.setFontSize(12);
-  doc.text('To,', margin, yPos);
-  yPos += 6;
+  // Contact line with phone & email
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(17, 24, 39);
+  doc.text(`Phone: ${phone}   |   Email: ${email}`, pageWidth - margin, yPos + 27, { align: 'right' });
 
-  // Client name
+  yPos += 37;
+
+  // ── 2. BILL TO & METADATA ────────────────────────────────────────────────
+  // Left: Bill To
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.setTextColor(17, 24, 39);
+  doc.text('To', margin, yPos);
+
+  yPos += 4.5;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
-  doc.text(invoice.client_name || '-', margin, yPos);
-  yPos += 6;
+  doc.text(clientName, margin, yPos);
 
-  // Address
+  yPos += 4.2;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(55, 65, 81);
+  doc.text(clientAddress, margin, yPos);
+
+  if (clientGstin) {
+    yPos += 4;
+    doc.text(`GST No : ${clientGstin}`, margin, yPos);
+  }
+
+  // Right: Invoice Meta
+  const metaRightX = pageWidth - margin;
+  const metaLabelX = pageWidth - margin - 35;
+  const metaY = yPos - 8.2;
+
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9.5);
+  doc.setTextColor(17, 24, 39);
+  doc.text('Invoice no :', metaLabelX, metaY);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.text(invoiceNumber, metaRightX, metaY, { align: 'right' });
 
-  if (invoice.client_address) {
-    const addressLines = doc.splitTextToSize(invoice.client_address, 120) as string[];
-    doc.text(addressLines, margin, yPos);
-    yPos += addressLines.length * 5;
-  }
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9.5);
+  doc.text('Date :', metaLabelX, metaY + 5.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.text(invoiceDateFormatted, metaRightX, metaY + 5.5, { align: 'right' });
 
-  // Phone
-  if (invoice.client_phone) {
-    doc.text(`Phone: ${invoice.client_phone}`, margin, yPos);
-    yPos += 5;
-  }
+  yPos += 8;
 
-  // GST
-  if (invoice.client_gstin) {
-    doc.text(`GST No.: ${invoice.client_gstin}`, margin, yPos);
-    yPos += 5;
-  }
-
-  yPos += 6;
-
-  // ── 7. ITEMS TABLE ────────────────────────────────────────────────────────
-  const items = invoice.items || [];
-
-const tableBody = items.map((item, index) => {
-  const quantity  = Number(item.quantity)   || 0;
-  const unitPrice = Number(item.unit_price) || 0;
-  const total     = Number(item.total)      || Number(item.subtotal) || (quantity * unitPrice);
-
-  // item.name is correct per your NewInvoice.tsx
-  const displayText = item.name?.trim()
-    ? item.name + (item.description ? `\n${item.description}` : '')
-    : '—';
-
-  return [
-    String(index + 1),
-    displayText,
-    String(quantity),
-    formatAmount(unitPrice),
-    formatAmount(total),
+  // ── 3. ITEMS TABLE ───────────────────────────────────────────────────────
+  const rawItems = invoice.items && invoice.items.length > 0 ? invoice.items : [
+    { name: 'Consultation', description: '', quantity: 1, unit_price: 300, total: 300 },
+    { name: 'Project Draft', description: '', quantity: 1, unit_price: 2400, total: 2400 },
+    { name: 'Implementation', description: '', quantity: 1, unit_price: 2500, total: 2500 },
+    { name: 'Additional Supplies', description: '', quantity: 1, unit_price: 750, total: 750 },
+    { name: 'Monthly meeting', description: '', quantity: 1, unit_price: 2000, total: 2000 },
   ];
-});
+
+  const subtotal = Number(invoice.subtotal) || rawItems.reduce((acc, it) => acc + (Number(it.quantity) * Number(it.unit_price)), 0);
+  const taxAmount = Number(invoice.tax_amount) || 0;
+  const discountAmount = Number(invoice.discount_amount) || 0;
+  const grandTotal = Number(invoice.total_amount) || (subtotal + taxAmount - discountAmount);
+
+  let taxPercent = 0;
+  if (subtotal > 0 && taxAmount > 0) {
+    taxPercent = Math.round((taxAmount / subtotal) * 100);
+  } else if (invoice.items?.[0]?.tax_rate) {
+    taxPercent = Number(invoice.items[0].tax_rate);
+  } else if (business?.default_tax_rate && taxAmount > 0) {
+    taxPercent = Number(business.default_tax_rate);
+  }
+
+  const tableBody = rawItems.map((item, index) => {
+    const qty = Number(item.quantity) || 1;
+    const price = Number(item.unit_price) || 0;
+    const lineTotal = Number((item as any).total) || (qty * price);
+    const displayText = item.name + (item.description ? `\n${item.description}` : '');
+
+    return [
+      String(index + 1),
+      displayText,
+      String(qty),
+      formatCurrency(price, currency),
+      formatCurrency(lineTotal, currency),
+    ];
+  });
+
+  // Solid top border rule above table
+  doc.setDrawColor(17, 24, 39);
+  doc.setLineWidth(0.5);
+  doc.line(margin, yPos, pageWidth - margin, yPos);
 
   autoTable(doc, {
-  startY: yPos,
-  head: [['No.', 'Item Description', 'Qty', 'Rate', 'Amount']],
-  body: tableBody,
-  theme: 'plain',  // ← changed from 'grid' to 'plain'
-
-  styles: {
-    font: 'helvetica',
-    fontSize: 10,
-    cellPadding: { top: 4, bottom: 4, left: 4, right: 4 },
-    lineColor: [200, 200, 200],
-    lineWidth: 0.3,
-    textColor: [0, 0, 0],
-    overflow: 'linebreak',
-    fillColor: false,  // ← transparent background
-  },
-
-  headStyles: {
-    fillColor: [30, 30, 30],  // header stays dark
-    textColor: [255, 255, 255],
-    fontStyle: 'bold',
-    halign: 'center',
-    fontSize: 10,
-  },
-
-  alternateRowStyles: {
-    fillColor: false,  // ← no alternating fill, fully transparent
-  },
-
-  bodyStyles: {
-    fillColor: false,  // ← transparent body rows
-    lineColor: [200, 200, 200],
-    lineWidth: 0.3,
-  },
-
-  columnStyles: {
-    0: { cellWidth: 12,     halign: 'center' },
-    1: { cellWidth: 'auto' },
-    2: { cellWidth: 18,     halign: 'center' },
-    3: { cellWidth: 32,     halign: 'right' },
-    4: { cellWidth: 35,     halign: 'right' },
-  },
-});
+    startY: yPos,
+    head: [['NO', 'DESCRIPTION', 'QTY', 'PRICE', 'TOTAL']],
+    body: tableBody,
+    theme: 'plain',
+    styles: {
+      font: 'helvetica',
+      fontSize: 8.5,
+      cellPadding: { top: 3.5, bottom: 3.5, left: 2, right: 2 },
+      textColor: [17, 24, 39],
+      overflow: 'linebreak',
+    },
+    headStyles: {
+      fontStyle: 'bold',
+      fontSize: 9,
+      textColor: [17, 24, 39],
+      fillColor: false,
+      halign: 'left',
+    },
+    columnStyles: {
+      0: { cellWidth: 12, halign: 'left' },
+      1: { cellWidth: 'auto', halign: 'left' },
+      2: { cellWidth: 16, halign: 'center' },
+      3: { cellWidth: 30, halign: 'right' },
+      4: { cellWidth: 32, halign: 'right' },
+    },
+    didDrawCell: (data) => {
+      // Draw dotted separator line under body rows except the last one
+      if (data.section === 'body' && data.row.index < tableBody.length - 1 && data.column.index === 4) {
+        const rowY = data.cell.y + data.cell.height;
+        doc.saveGraphicsState();
+        doc.setDrawColor(180, 180, 180);
+        doc.setLineWidth(0.2);
+        doc.setLineDashPattern([0.8, 1.2], 0);
+        doc.line(margin, rowY, pageWidth - margin, rowY);
+        doc.restoreGraphicsState();
+      }
+    },
+  });
 
   const finalY = (doc as any).lastAutoTable.finalY as number;
 
-  // ── 8. TOTALS BLOCK — right-aligned below table ───────────────────────────
-  const subtotal   = Number(invoice.subtotal);
-  const totalTax   = Number(invoice.tax_amount);
-  const totalAmt   = Number(invoice.total_amount);
-  const discount   = Number(invoice.discount_amount) || 0;
-  const amountPaid = Number(invoice.amount_paid) || 0;
-  const hasTax     = totalTax > 0;
+  // Solid bottom border rule under table
+  doc.setDrawColor(17, 24, 39);
+  doc.setLineWidth(0.5);
+  doc.line(margin, finalY, pageWidth - margin, finalY);
 
-  const labelX  = pageWidth - margin - 70;
-  let totalsY   = finalY + 7;
+  // ── 4. SCAN TO PAY & TOTALS ──────────────────────────────────────────────
+  const belowTableY = finalY + 7;
 
-  doc.setFontSize(10);
-  doc.setTextColor(0, 0, 0);
+  // Left: SCAN TO PAY
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.setTextColor(17, 24, 39);
+  doc.text('SCAN TO PAY', margin, belowTableY);
 
-  // Sub-total row (only shown when tax is present, for clarity)
-  if (hasTax) {
-    const halfTax  = totalTax / 2;
-    const halfRate = subtotal > 0 ? (halfTax / subtotal) * 100 : 0;
+  // QR Code
+  const upiPayString = `upi://pay?pa=${phone}@upi&pn=${encodeURIComponent(businessName)}&am=${grandTotal}&cu=INR`;
+  const qrDataUrl = await generatePaymentQRCode(upiPayString);
+  doc.addImage(qrDataUrl, 'PNG', margin, belowTableY + 2.5, 26, 26);
 
-    doc.setFont('helvetica', 'normal');
+  // Right: Summary lines
+  const sumLabelX = pageWidth - margin - 65;
+  const sumValX = pageWidth - margin;
+  let sumY = belowTableY + 1;
 
-    doc.text('Sub-Total:', labelX, totalsY);
-    doc.text(formatAmount(subtotal), pageWidth - margin, totalsY, { align: 'right' });
-    totalsY += 5.5;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(17, 24, 39);
+  doc.text('Sub Total', sumLabelX, sumY);
+  doc.text(formatCurrency(subtotal, currency), sumValX, sumY, { align: 'right' });
 
-    doc.text(`SGST @ ${halfRate.toFixed(1)}%:`, labelX, totalsY);
-    doc.text(formatAmount(halfTax), pageWidth - margin, totalsY, { align: 'right' });
-    totalsY += 5.5;
-
-    doc.text(`CGST @ ${halfRate.toFixed(1)}%:`, labelX, totalsY);
-    doc.text(formatAmount(halfTax), pageWidth - margin, totalsY, { align: 'right' });
-    totalsY += 5.5;
+  if (taxPercent > 0) {
+    sumY += 5.5;
+    doc.text(`Tax ${taxPercent}%`, sumLabelX, sumY);
+    doc.text(formatCurrency(taxAmount, currency), sumValX, sumY, { align: 'right' });
   }
 
-  // Discount
-  if (discount > 0) {
-    doc.setFont('helvetica', 'normal');
-    doc.text('Discount:', labelX, totalsY);
-    doc.text(`-${formatAmount(discount)}`, pageWidth - margin, totalsY, { align: 'right' });
-    totalsY += 5.5;
+  if (discountAmount > 0) {
+    sumY += 5.5;
+    doc.text('Discount', sumLabelX, sumY);
+    doc.text(`-${formatCurrency(discountAmount, currency)}`, sumValX, sumY, { align: 'right' });
   }
 
-  // Thin rule above grand total
-  doc.setDrawColor(0, 0, 0);
-  doc.setLineWidth(0.4);
-  doc.line(labelX, totalsY, pageWidth - margin, totalsY);
-  totalsY += 4;
+  // GRAND TOTAL Block
+  const blockY = sumY + 6;
+  const blockW = 75;
+  const blockH = 9;
+  const blockX = pageWidth - margin - blockW;
 
-  // Grand Total — bold label + amount
-  doc.setFont('times', 'bold');
-  doc.setFontSize(12);
-  doc.text('Total:', labelX, totalsY);
-  doc.text(formatAmount(totalAmt), pageWidth - margin, totalsY, { align: 'right' });
-  totalsY += 8;
+  doc.setFillColor(74, 74, 74);
+  doc.rect(blockX, blockY, blockW, blockH, 'F');
 
-  // Advance & remaining balance
-  if (amountPaid > 0) {
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.text('Advance Paid:', labelX, totalsY);
-    doc.text(`-${formatAmount(amountPaid)}`, pageWidth - margin, totalsY, { align: 'right' });
-    totalsY += 5.5;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9.5);
+  doc.setTextColor(255, 255, 255);
+  doc.text('GRAND TOTAL', blockX + 4, blockY + 6);
+  doc.text(formatCurrency(grandTotal, currency), blockX + blockW - 4, blockY + 6, { align: 'right' });
 
-    const balance = totalAmt - amountPaid;
-    if (balance > 0) {
-      doc.setFont('helvetica', 'bold');
-      doc.text('Balance Due:', labelX, totalsY);
-      doc.text(formatAmount(balance), pageWidth - margin, totalsY, { align: 'right' });
-      totalsY += 5.5;
-    }
-  }
+  // ── 5. TERMS, WARRANTY & SIGNATURE ───────────────────────────────────────
+  const termsY = Math.max(belowTableY + 33, blockY + 16);
 
-  // ── 9. TERMS & CONDITIONS ─────────────────────────────────────────────────
-  let termsY = totalsY + 8;
+  const termsText = invoice.terms || business?.default_terms || DEFAULT_INVOICE_TERMS;
+  const warrantyText = invoice.notes || business?.default_notes || DEFAULT_INVOICE_WARRANTY;
 
-  if (invoice.notes || invoice.terms) {
-    doc.setFont('times', 'bold');
-    doc.setFontSize(11);
-    doc.setTextColor(0, 0, 0);
-    doc.text('Terms & Conditions:', margin, termsY);
-    termsY += 6;
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9.5);
-
-    if (invoice.notes) {
-      const lines = doc.splitTextToSize(invoice.notes, pageWidth - margin * 2) as string[];
-      doc.text(lines, margin, termsY);
-      termsY += lines.length * 4.8 + 2;
-    }
-
-    if (invoice.terms) {
-      const lines = doc.splitTextToSize(invoice.terms, pageWidth - margin * 2) as string[];
-      doc.text(lines, margin, termsY);
-      termsY += lines.length * 4.8;
-    }
-  }
-
-  // ── 10. FOOTER ───────────────────────────────────────────────────────────
-  // Clamp footer so it never overlaps content AND never floats too high
-  const footerY = Math.max(termsY + 12, pageHeight - 28);
-
-  // Separator line above footer
-  doc.setDrawColor(180, 180, 180);
-  doc.setLineWidth(0.3);
-  doc.line(margin, footerY - 4, pageWidth - margin, footerY - 4);
+  // Left column: Terms & Warranty
+  const leftColWidth = 110;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(17, 24, 39);
+  doc.text('Term and Conditions :', margin, termsY);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9.5);
-  doc.setTextColor(0, 0, 0);
-  doc.text('Thanking you,', margin, footerY);
+  doc.setFontSize(7.5);
+  doc.setTextColor(75, 85, 99);
+  const termLines = doc.splitTextToSize(termsText, leftColWidth) as string[];
+  doc.text(termLines, margin, termsY + 4);
+
+  const warrantyY = termsY + 5 + termLines.length * 3.5;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(17, 24, 39);
+  doc.text('Warranty and Disclaimers :', margin, warrantyY);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.setTextColor(75, 85, 99);
+  const warrantyLines = doc.splitTextToSize(warrantyText, leftColWidth) as string[];
+  doc.text(warrantyLines, margin, warrantyY + 4);
+
+  // Right column: Cursive signature, Name & Properator
+  const sigX = pageWidth - margin - 22;
+  const sigY = termsY + 6;
+
+  // Cursive signature (Adeline Palmerston)
+  doc.setFont('times', 'italic');
+  doc.setFontSize(16);
+  doc.setTextColor(100, 100, 100);
+  doc.text(DEFAULT_SIGNATURE_TEXT, sigX, sigY, { align: 'center' });
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
-  doc.text(businessName, margin, footerY + 6);
+  doc.setTextColor(17, 24, 39);
+  doc.text(DEFAULT_SIGNATORY_NAME, sigX, sigY + 6, { align: 'center' });
 
-  // Right side: authorised signatory label
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9.5);
-  doc.text('Authorised Signatory', pageWidth - margin, footerY + 6, { align: 'right' });
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(59, 130, 246); // Blue color for designation
+  doc.text(DEFAULT_SIGNATORY_ROLE, sigX, sigY + 10.5, { align: 'center' });
+
+  // ── 6. FOOTER ────────────────────────────────────────────────────────────
+  const footerY = pageHeight - 16;
+
+  // Separator line
+  doc.setDrawColor(180, 180, 180);
+  doc.setLineWidth(0.3);
+  doc.line(margin, footerY - 5, pageWidth - margin, footerY - 5);
+
+  // Electronics icon text / vector representations on left
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(55, 65, 81);
+  doc.text('[CCTV]   [DISH]   [AUDIO]   [TV]   [WI-FI]', margin, footerY + 2);
+
+  // Blue cursive script on right
+  doc.setFont('times', 'italic');
+  doc.setFontSize(13);
+  doc.setTextColor(59, 130, 246);
+  doc.text('Thank You for your Purchase !', pageWidth - margin, footerY + 2, { align: 'right' });
 
   return doc;
 }
 
-// ─── Convenience wrappers ─────────────────────────────────────────────────────
+/**
+ * Draws the Mohan Electronics stylized swoosh & ME logo in vector graphics
+ */
+function drawDefaultLogo(doc: jsPDF, x: number, y: number) {
+  doc.saveGraphicsState();
+  doc.setDrawColor(17, 24, 39);
+  doc.setLineWidth(1.2);
+
+  // Outer swoosh curve
+  doc.ellipse(x + 12, y + 10, 14, 7, 'S');
+
+  // Center "ME" letters
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(18);
+  doc.setTextColor(17, 24, 39);
+  doc.text('ME', x + 5, y + 13);
+  doc.restoreGraphicsState();
+}
 
 export async function downloadInvoicePDF(params: GenerateInvoicePDFParams): Promise<void> {
   const doc = await generateInvoicePDF(params);

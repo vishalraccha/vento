@@ -16,14 +16,16 @@ interface InvoiceDocumentViewProps {
   invoice: Invoice & { items?: InvoiceItem[] };
   business: Business | null;
   className?: string;
+  initialQrCodeUrl?: string;
 }
 
 export function InvoiceDocumentView({
   invoice,
   business,
   className = '',
+  initialQrCodeUrl = '',
 }: InvoiceDocumentViewProps) {
-  const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
+  const [qrCodeUrl, setQrCodeUrl] = useState<string>(initialQrCodeUrl);
 
   const currency = business?.currency || 'INR';
   const businessName = (business?.business_name || 'MOHAN ELECTRONICS').toUpperCase();
@@ -68,9 +70,13 @@ export function InvoiceDocumentView({
 
   // Generate UPI QR Code
   useEffect(() => {
+    if (initialQrCodeUrl) {
+      setQrCodeUrl(initialQrCodeUrl);
+      return;
+    }
     const upiPayString = `upi://pay?pa=${phone}@upi&pn=${encodeURIComponent(businessName)}&am=${grandTotal}&cu=INR`;
     generatePaymentQRCode(upiPayString).then(url => setQrCodeUrl(url));
-  }, [phone, businessName, grandTotal]);
+  }, [initialQrCodeUrl, phone, businessName, grandTotal]);
 
   const termsText = invoice.terms || business?.default_terms || DEFAULT_INVOICE_TERMS;
   const warrantyText = invoice.notes || business?.default_notes || DEFAULT_INVOICE_WARRANTY;
@@ -81,19 +87,25 @@ export function InvoiceDocumentView({
       style={{ fontFamily: "'Inter', sans-serif" }}
     >
       {/* ── 1. TOP HEADER ─────────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
+      <div className="flex justify-between items-start">
         {/* Left: Logo & INVOICE label */}
         <div className="flex flex-col items-start">
           {business?.logo_url ? (
-            <img
-              src={business.logo_url}
-              alt="Logo"
-              className="h-20 w-auto object-contain mb-4"
-            />
+            <div className="mb-3 max-h-20 max-w-[220px] flex items-center justify-start overflow-hidden">
+              <img
+                src={business.logo_url}
+                alt={businessName}
+                className="max-h-20 max-w-[200px] w-auto h-auto object-contain"
+                onError={(e) => {
+                  // Fallback if image fails to load
+                  (e.target as HTMLElement).style.display = 'none';
+                }}
+              />
+            </div>
           ) : (
             /* Stylized ME Logo swoosh matching the reference image */
-            <div className="mb-4">
-              <svg width="100" height="70" viewBox="0 0 140 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <div className="mb-3">
+              <svg width="105" height="72" viewBox="0 0 140 100" fill="none" xmlns="http://www.w3.org/2000/svg">
                 {/* Curved swoosh ellipse */}
                 <path
                   d="M130 35 C130 10, 60 5, 20 40 C-5 65, 30 95, 75 92 C105 90, 135 65, 125 45"
@@ -118,18 +130,22 @@ export function InvoiceDocumentView({
             </div>
           )}
 
-          {/* Charcoal accent bar + INVOICE title */}
-          <div className="flex items-center gap-3 mt-1">
-            <div className="w-14 h-6 bg-[#4a4a4a]" />
-            <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-[#111827] uppercase">
+          {/* 
+            Charcoal accent bar + INVOICE title:
+            In reference image, 'INVOICE' starts at the EXACT same left margin line as 'To', 'NO', and 'SCAN TO PAY'.
+            The charcoal rectangle bleeds into the left padding gutter.
+          */}
+          <div className="flex items-center gap-2.5 mt-3">
+            <div className="w-10 sm:w-14 h-7 sm:h-8 bg-[#4a4a4a] -ml-6 sm:-ml-10 shrink-0" />
+            <h1 className="text-3xl sm:text-4xl font-black tracking-widest text-[#111827] uppercase leading-none">
               INVOICE
             </h1>
           </div>
         </div>
 
         {/* Right: Business Info */}
-        <div className="text-left sm:text-right flex flex-col items-start sm:items-end">
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-[#374151] tracking-tight leading-tight uppercase max-w-[280px]">
+        <div className="text-right flex flex-col items-end shrink-0 ml-auto max-w-[380px]">
+          <h2 className="text-2xl sm:text-3xl font-extrabold text-[#374151] tracking-tight leading-tight uppercase text-right">
             {businessName.includes(' ') ? (
               <>
                 <span>{businessName.split(' ')[0]}</span>
@@ -141,35 +157,35 @@ export function InvoiceDocumentView({
             )}
           </h2>
 
-          <p className="text-xs sm:text-[13px] text-gray-700 font-medium mt-1">
+          <p className="text-xs sm:text-[13px] text-gray-700 font-medium mt-1 text-right">
             Add. : {address}
           </p>
-          <p className="text-xs sm:text-[13px] text-gray-700 font-medium">
+          <p className="text-xs sm:text-[13px] text-gray-700 font-medium text-right">
             GST No : {gstin}
           </p>
 
-          {/* Contact with icons */}
-          <div className="flex items-center gap-4 text-xs sm:text-[13px] text-gray-800 font-medium mt-1">
-            <span className="inline-flex items-center gap-1">
-              <span className="w-4 h-4 rounded-full bg-black text-white flex items-center justify-center p-0.5">
+          {/* Contact with clean black circular icons on a single line */}
+          <div className="flex items-center justify-end gap-3 text-xs sm:text-[13px] text-gray-800 font-medium mt-1.5 whitespace-nowrap">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-4 h-4 rounded-full bg-black text-white flex items-center justify-center p-0.5 shrink-0">
                 <Phone className="w-2.5 h-2.5 fill-current" />
               </span>
-              {phone}
+              <span>{phone}</span>
             </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="w-4 h-4 rounded-full bg-black text-white flex items-center justify-center p-0.5">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-4 h-4 rounded-full bg-black text-white flex items-center justify-center p-0.5 shrink-0">
                 <Mail className="w-2.5 h-2.5 fill-current" />
               </span>
-              {email}
+              <span>{email}</span>
             </span>
           </div>
         </div>
       </div>
 
       {/* ── 2. BILL TO & METADATA ROW ──────────────────────────────────────── */}
-      <div className="mt-8 pt-2 flex flex-col sm:flex-row justify-between items-start gap-6">
+      <div className="mt-8 flex justify-between items-start gap-6">
         {/* Bill To */}
-        <div className="max-w-[320px]">
+        <div className="max-w-[340px]">
           <p className="text-sm font-semibold text-gray-800">To</p>
           <h3 className="text-base sm:text-lg font-bold text-[#111827] uppercase mt-0.5">
             {clientName}
@@ -185,19 +201,13 @@ export function InvoiceDocumentView({
         </div>
 
         {/* Invoice Meta */}
-        <div className="w-full sm:w-auto">
-          <table className="text-sm border-separate border-spacing-y-1">
-            <tbody>
-              <tr>
-                <td className="text-gray-800 font-medium pr-8">Invoice no :</td>
-                <td className="text-right font-extrabold text-black text-base">{invoiceNumber}</td>
-              </tr>
-              <tr>
-                <td className="text-gray-800 font-medium pr-8">Date :</td>
-                <td className="text-right font-medium text-gray-900">{invoiceDateFormatted}</td>
-              </tr>
-            </tbody>
-          </table>
+        <div className="shrink-0 text-right">
+          <div className="grid grid-cols-[auto_auto] gap-x-6 gap-y-1.5 items-center justify-end">
+            <span className="text-sm font-medium text-gray-700 text-left">Invoice no :</span>
+            <span className="text-base font-extrabold text-black text-right">{invoiceNumber}</span>
+            <span className="text-sm font-medium text-gray-700 text-left">Date :</span>
+            <span className="text-sm font-semibold text-gray-900 text-right">{invoiceDateFormatted}</span>
+          </div>
         </div>
       </div>
 
@@ -205,12 +215,12 @@ export function InvoiceDocumentView({
       <div className="mt-6">
         <table className="w-full border-collapse">
           <thead>
-            <tr className="border-t border-b-2 border-black text-xs sm:text-sm">
+            <tr className="border-t border-b border-black text-xs sm:text-sm">
               <th className="py-2.5 text-left font-extrabold text-black w-12">NO</th>
               <th className="py-2.5 text-left font-extrabold text-black">DESCRIPTION</th>
               <th className="py-2.5 text-center font-extrabold text-black w-16">QTY</th>
-              <th className="py-2.5 text-right font-extrabold text-black w-24 sm:w-28">PRICE</th>
-              <th className="py-2.5 text-right font-extrabold text-black w-24 sm:w-28">TOTAL</th>
+              <th className="py-2.5 text-right font-extrabold text-black w-28">PRICE</th>
+              <th className="py-2.5 text-right font-extrabold text-black w-28">TOTAL</th>
             </tr>
           </thead>
           <tbody>
@@ -224,21 +234,21 @@ export function InvoiceDocumentView({
                 <tr
                   key={index}
                   className={`text-xs sm:text-sm ${
-                    !isLast ? 'border-b border-dotted border-gray-400' : ''
+                    !isLast ? 'border-b border-dotted border-gray-300' : ''
                   }`}
                 >
-                  <td className="py-3 text-left text-gray-800 font-normal">{index + 1}</td>
-                  <td className="py-3 text-left">
-                    <p className="font-normal text-gray-900">{item.name}</p>
+                  <td className="py-3 text-left font-medium text-gray-900">{index + 1}</td>
+                  <td className="py-3 text-left font-medium text-gray-900">
+                    <span className="font-semibold text-black">{item.name}</span>
                     {item.description && (
-                      <p className="text-[11px] text-gray-500 mt-0.5">{item.description}</p>
+                      <span className="block text-xs text-gray-600 mt-0.5">{item.description}</span>
                     )}
                   </td>
-                  <td className="py-3 text-center text-gray-800 font-normal">{qty}</td>
-                  <td className="py-3 text-right text-gray-800 font-normal">
+                  <td className="py-3 text-center font-medium text-gray-900">{qty}</td>
+                  <td className="py-3 text-right font-medium text-gray-900">
                     {formatCurrency(price, currency)}
                   </td>
-                  <td className="py-3 text-right text-gray-900 font-normal">
+                  <td className="py-3 text-right font-semibold text-black">
                     {formatCurrency(total, currency)}
                   </td>
                 </tr>
@@ -246,69 +256,67 @@ export function InvoiceDocumentView({
             })}
           </tbody>
         </table>
-        {/* Solid bottom rule */}
+        {/* Solid bottom border rule under table */}
         <div className="border-b border-black w-full" />
       </div>
 
       {/* ── 4. SCAN TO PAY & TOTALS ────────────────────────────────────────── */}
-      <div className="mt-6 flex flex-col sm:flex-row justify-between items-start gap-6">
-        {/* Left: Scan to Pay */}
+      <div className="mt-6 flex justify-between items-start gap-8">
+        {/* Left: SCAN TO PAY */}
         <div className="flex flex-col items-start">
-          <p className="text-xs sm:text-sm font-extrabold text-black tracking-wide uppercase mb-2">
+          <h4 className="text-sm font-extrabold text-black tracking-wide uppercase mb-2">
             SCAN TO PAY
-          </p>
-          {qrCodeUrl ? (
-            <img
-              src={qrCodeUrl}
-              alt="Scan to pay"
-              className="w-28 h-28 sm:w-32 sm:h-32 object-contain border border-gray-200 p-1 rounded-sm shadow-sm"
-            />
-          ) : (
-            <div className="w-28 h-28 sm:w-32 sm:h-32 bg-gray-100 flex items-center justify-center text-xs text-gray-400 border border-gray-200">
-              QR Code
-            </div>
-          )}
+          </h4>
+          <div className="border border-gray-200 p-1 bg-white inline-block">
+            {qrCodeUrl ? (
+              <img
+                src={qrCodeUrl}
+                alt="Payment QR"
+                className="w-28 h-28 object-contain"
+              />
+            ) : (
+              <div className="w-28 h-28 bg-gray-100 flex items-center justify-center text-xs text-gray-400">
+                Loading QR...
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Right: Totals block */}
-        <div className="w-full sm:w-[320px] flex flex-col">
-          <div className="space-y-1.5 text-xs sm:text-sm pr-1">
-            <div className="flex justify-between items-center">
-              <span className="font-extrabold text-gray-900">Sub Total</span>
+        {/* Right: Summary & GRAND TOTAL */}
+        <div className="w-[280px] sm:w-[320px] flex flex-col shrink-0">
+          <div className="space-y-2 mb-3">
+            <div className="flex justify-between items-center text-sm px-1">
+              <span className="font-bold text-gray-900">Sub Total</span>
               <span className="font-bold text-gray-900">{formatCurrency(subtotal, currency)}</span>
             </div>
 
             {taxPercent > 0 && (
-              <div className="flex justify-between items-center">
-                <span className="font-extrabold text-gray-900">Tax {taxPercent}%</span>
+              <div className="flex justify-between items-center text-sm px-1">
+                <span className="font-bold text-gray-900">Tax {taxPercent}%</span>
                 <span className="font-bold text-gray-900">{formatCurrency(taxAmount, currency)}</span>
               </div>
             )}
 
             {discountAmount > 0 && (
-              <div className="flex justify-between items-center">
-                <span className="font-extrabold text-gray-900">Discount</span>
+              <div className="flex justify-between items-center text-sm px-1">
+                <span className="font-bold text-gray-900">Discount</span>
                 <span className="font-bold text-gray-900">-{formatCurrency(discountAmount, currency)}</span>
               </div>
             )}
           </div>
 
-          {/* GRAND TOTAL solid dark block */}
-          <div className="mt-4 bg-[#4a4a4a] text-white flex justify-between items-center px-4 py-2.5 rounded-[2px] shadow-sm">
-            <span className="text-xs sm:text-sm font-extrabold tracking-wider uppercase">
-              GRAND TOTAL
-            </span>
-            <span className="text-sm sm:text-base font-extrabold">
-              {formatCurrency(grandTotal, currency)}
-            </span>
+          {/* Solid dark charcoal GRAND TOTAL block */}
+          <div className="bg-[#4a4a4a] text-white px-3 py-2.5 flex justify-between items-center">
+            <span className="font-extrabold text-sm tracking-wider uppercase">GRAND TOTAL</span>
+            <span className="font-extrabold text-base tracking-wide">{formatCurrency(grandTotal, currency)}</span>
           </div>
         </div>
       </div>
 
       {/* ── 5. TERMS, WARRANTY & SIGNATURE ─────────────────────────────────── */}
-      <div className="mt-8 pt-2 flex flex-col sm:flex-row justify-between items-start gap-8">
-        {/* Left: Terms and Warranty */}
-        <div className="flex-1 space-y-4 max-w-[450px]">
+      <div className="mt-8 flex justify-between items-start gap-8">
+        {/* Left: Terms & Warranty */}
+        <div className="flex-1 space-y-4 max-w-[460px]">
           <div>
             <h4 className="text-xs sm:text-sm font-extrabold text-black">
               Term and Conditions :
@@ -329,33 +337,29 @@ export function InvoiceDocumentView({
         </div>
 
         {/* Right: Signature */}
-        <div className="w-full sm:w-[220px] flex flex-col items-center sm:items-end justify-center text-center sm:text-right mt-2 sm:mt-0">
-          {/* Cursive Signature */}
+        <div className="w-[220px] shrink-0 flex flex-col items-center justify-center text-center">
           <div
-            className="text-2xl sm:text-3xl text-gray-700 italic select-none mb-1"
+            className="text-2xl sm:text-3xl text-gray-700 italic select-none mb-1 whitespace-nowrap"
             style={{ fontFamily: "'Alex Brush', 'Dancing Script', cursive" }}
           >
             {DEFAULT_SIGNATURE_TEXT}
           </div>
-
-          {/* Name & Title */}
-          <p className="text-sm font-extrabold text-black">
+          <p className="text-sm font-extrabold text-black whitespace-nowrap">
             {DEFAULT_SIGNATORY_NAME}
           </p>
-          <p className="text-xs sm:text-sm font-bold text-[#3b82f6]">
+          <p className="text-xs sm:text-sm font-bold text-[#2563eb] whitespace-nowrap">
             {DEFAULT_SIGNATORY_ROLE}
           </p>
         </div>
       </div>
 
       {/* ── 6. FOOTER ──────────────────────────────────────────────────────── */}
-      <div className="mt-8 pt-4 border-t border-gray-400 flex flex-col sm:flex-row justify-between items-center gap-4">
+      <div className="mt-8 pt-4 border-t border-gray-400 flex justify-between items-center gap-4">
         {/* Left: Product / Electronic icons */}
-        <div className="flex items-center gap-3.5 text-black">
+        <div className="flex items-center gap-4 text-black">
           {/* CCTV Camera Icon */}
           <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24">
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 14.5v-2.09c2.83-.48 5-2.94 5-5.91s-2.17-5.43-5-5.91V2.5c0-.28-.22-.5-.5-.5s-.5.22-.5.5v2.09c-2.83.48-5 2.94-5 5.91s2.17 5.43 5 5.91v2.09l-3.5 3.5 1.41 1.41L12 16.91l2.09 2.09 1.41-1.41L12 14.09v2.41z"/>
-            <path d="M4 10h11l3-4H7L4 10zm-2 2h4v7H2v-7zm16-1l4-2v6l-4-2v-2z"/>
+            <path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4zM14 13h-3v3H9v-3H6v-2h3V8h2v3h3v2z" />
           </svg>
           {/* Satellite Dish Icon */}
           <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24">
@@ -385,8 +389,8 @@ export function InvoiceDocumentView({
 
         {/* Right: Thank You script */}
         <div
-          className="text-xl sm:text-2xl font-bold text-[#3b82f6] tracking-wide select-none"
-          style={{ fontFamily: "'Dancing Script', 'Alex Brush', cursive" }}
+          className="text-xl sm:text-2xl text-[#2563eb] italic font-semibold select-none whitespace-nowrap"
+          style={{ fontFamily: "'Alex Brush', 'Dancing Script', cursive" }}
         >
           Thank You for your Purchase !
         </div>

@@ -161,6 +161,7 @@ export default function BusinessSetup() {
     try {
       await updateBusiness.mutateAsync({
         ...formData,
+        logo_url: business?.logo_url || null,
         setup_completed: true,
       });
       navigate('/');

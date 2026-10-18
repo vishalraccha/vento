@@ -43,3 +43,18 @@ export function formatCurrency(amount: number, currency = 'INR'): string {
     maximumFractionDigits: 2,
   })}`;
 }
+
+/**
+ * Safe currency formatter for raw jsPDF standard 14 fonts (WinAnsi encoding)
+ * where Unicode ₹ (U+20B9) is not supported and would render as superscript 1 (¹).
+ */
+export function formatPDFCurrency(amount: number, currency = 'INR'): string {
+  const numericAmount = Number(amount) || 0;
+  const symbol = currency === 'USD' ? '$' : currency === 'EUR' ? '€' : currency === 'GBP' ? '£' : 'Rs. ';
+  
+  return `${symbol}${numericAmount.toLocaleString('en-IN', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })}`;
+}
+

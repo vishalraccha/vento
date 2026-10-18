@@ -2,11 +2,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Quotation, QuotationItem } from '@/types/database';
+import { useToast } from '@/hooks/use-toast';
 import { extractDocumentSequenceNumber } from '@/lib/documentNumber';
 import { deduplicateUserDocuments } from '@/lib/deduplicateDocuments';
 
 export function useQuotations() {
   const { user } = useAuth();
+  const { toast } = useToast();
   const queryClient = useQueryClient();
 
   const quotationsQuery = useQuery({

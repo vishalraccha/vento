@@ -60,17 +60,32 @@ export function useBusiness() {
     mutationFn: async (updates: Partial<Business>) => {
       if (!user) throw new Error('Not authenticated');
       
-      const { data, error } = await supabase
+      // Check if business row already exists
+      const { data: existing } = await supabase
         .from('businesses')
-        .upsert(
-          { user_id: user.id, ...updates, updated_at: new Date().toISOString() },
-          { onConflict: 'user_id' }
-        )
-        .select()
+        .select('id')
+        .eq('user_id', user.id)
         .maybeSingle();
+
+      let result;
+      if (existing) {
+        // Use update so unspecified fields like logo_url are NEVER wiped
+        result = await supabase
+          .from('businesses')
+          .update({ ...updates, updated_at: new Date().toISOString() })
+          .eq('user_id', user.id)
+          .select()
+          .maybeSingle();
+      } else {
+        result = await supabase
+          .from('businesses')
+          .insert({ user_id: user.id, ...updates, updated_at: new Date().toISOString() })
+          .select()
+          .maybeSingle();
+      }
       
-      if (error) throw error;
-      return data as Business;
+      if (result.error) throw result.error;
+      return result.data as Business;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['businesses'] });
@@ -91,38 +106,53 @@ export function useBusiness() {
       if (!user) throw new Error('Not authenticated');
       
       // Generate unique filename
-      const fileExt = file.name.split('.').pop();
+      const fileExt = file.name.split('.').pop() || 'png';
       const fileName = `${user.id}/logo-${Date.now()}.${fileExt}`;
       
-      // Delete old logo if exists
-      if (businessQuery.data?.logo_url) {
-        const oldPath = businessQuery.data.logo_url.split('/').pop();
-        if (oldPath) {
-          await supabase.storage
-            .from('business-logos')
-            .remove([`${user.id}/${oldPath}`]);
+      let finalLogoUrl: string | null = null;
+      
+      // Attempt upload to Supabase storage
+      try {
+        if (businessQuery.data?.logo_url && !businessQuery.data.logo_url.startsWith('data:')) {
+          const oldPath = businessQuery.data.logo_url.split('/').pop();
+          if (oldPath) {
+            await supabase.storage
+              .from('business-logos')
+              .remove([`${user.id}/${oldPath}`]);
+          }
         }
+
+        const { error: uploadError } = await supabase.storage
+          .from('business-logos')
+          .upload(fileName, file, {
+            cacheControl: '3600',
+            upsert: true,
+          });
+        
+        if (!uploadError) {
+          const { data: { publicUrl } } = supabase.storage
+            .from('business-logos')
+            .getPublicUrl(fileName);
+          finalLogoUrl = publicUrl;
+        }
+      } catch (storageErr) {
+        console.warn('Storage bucket upload failed, using data URL fallback:', storageErr);
       }
-      
-      // Upload new logo
-      const { error: uploadError } = await supabase.storage
-        .from('business-logos')
-        .upload(fileName, file, {
-          cacheControl: '3600',
-          upsert: true,
+
+      // If storage is not available, convert to base64 Data URL so upload ALWAYS succeeds
+      if (!finalLogoUrl) {
+        finalLogoUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
         });
-      
-      if (uploadError) throw uploadError;
-      
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('business-logos')
-        .getPublicUrl(fileName);
+      }
       
       // Update business with logo URL
       const { data, error } = await supabase
         .from('businesses')
-        .update({ logo_url: publicUrl, updated_at: new Date().toISOString() })
+        .update({ logo_url: finalLogoUrl, updated_at: new Date().toISOString() })
         .eq('user_id', user.id)
         .select()
         .maybeSingle();
@@ -132,6 +162,7 @@ export function useBusiness() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['businesses'] });
+      queryClient.invalidateQueries({ queryKey: ['business'] });
       toast({ title: 'Logo uploaded successfully' });
     },
     onError: (error) => {

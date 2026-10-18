@@ -1,7 +1,11 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import html2canvas from 'html2canvas';
+import React from 'react';
+import { createRoot } from 'react-dom/client';
 import { format } from 'date-fns';
 import { Invoice, InvoiceItem, Business } from '@/types/database';
+import { InvoiceDocumentView } from '@/components/documents/InvoiceDocumentView';
 import {
   DEFAULT_INVOICE_TERMS,
   DEFAULT_INVOICE_WARRANTY,
@@ -9,15 +13,128 @@ import {
   DEFAULT_SIGNATORY_ROLE,
   DEFAULT_SIGNATURE_TEXT,
   generatePaymentQRCode,
-  formatCurrency,
+  formatPDFCurrency,
 } from './invoiceTemplateConstants';
 
-interface GenerateInvoicePDFParams {
+export interface GenerateInvoicePDFParams {
   invoice: Invoice & { items?: InvoiceItem[] };
   business: Business | null;
 }
 
+/**
+ * Generates an exact, pixel-perfect PDF of the invoice matching the on-screen preview.
+ * Uses html2canvas to render the high-resolution InvoiceDocumentView with true fonts,
+ * vector icons, and proper currency rendering, falling back to direct vector jsPDF if needed.
+ */
 export async function generateInvoicePDF({
+  invoice,
+  business,
+}: GenerateInvoicePDFParams): Promise<jsPDF> {
+  // If running in browser environment, use high-resolution DOM snapshot
+  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    try {
+      const currency = business?.currency || 'INR';
+      const businessName = (business?.business_name || 'MOHAN ELECTRONICS').toUpperCase();
+      const phone = business?.phone_number || '9370426583';
+
+      const items = invoice.items && invoice.items.length > 0 ? invoice.items : [];
+      const subtotal = Number(invoice.subtotal) || items.reduce((acc, it) => acc + (Number(it.quantity) * Number(it.unit_price)), 0);
+      const taxAmount = Number(invoice.tax_amount) || 0;
+      const discountAmount = Number(invoice.discount_amount) || 0;
+      const grandTotal = Number(invoice.total_amount) || (subtotal + taxAmount - discountAmount);
+
+      // Pre-generate QR code so it is immediately rendered
+      const upiPayString = `upi://pay?pa=${phone}@upi&pn=${encodeURIComponent(businessName)}&am=${grandTotal}&cu=INR`;
+      const qrDataUrl = await generatePaymentQRCode(upiPayString);
+
+      // Create off-screen container matching A4 standard dimensions at 96 DPI (794px width)
+      const container = document.createElement('div');
+      container.style.position = 'fixed';
+      container.style.left = '-9999px';
+      container.style.top = '0';
+      container.style.width = '794px';
+      container.style.minHeight = '1123px';
+      container.style.backgroundColor = '#ffffff';
+      container.style.color = '#111827';
+      container.style.zIndex = '-9999';
+      container.style.margin = '0';
+      container.style.padding = '0';
+      container.style.boxSizing = 'border-box';
+      document.body.appendChild(container);
+
+      const root = createRoot(container);
+      root.render(
+        React.createElement(InvoiceDocumentView, {
+          invoice,
+          business,
+          initialQrCodeUrl: qrDataUrl,
+          className: '!border-0 !shadow-none !rounded-none !p-10 !max-w-none w-[794px] bg-white',
+        })
+      );
+
+      // Wait for layout paint and Google Fonts to be ready
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      if (document.fonts) {
+        await document.fonts.ready;
+      }
+
+      const targetEl = (container.firstElementChild as HTMLElement) || container;
+      const canvas = await html2canvas(targetEl, {
+        scale: 2, // 2x high resolution
+        useCORS: true,
+        allowTaint: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        windowWidth: 794,
+      });
+
+      // Cleanup DOM node
+      root.unmount();
+      container.remove();
+
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+        compress: true,
+      });
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.98);
+      const pdfWidth = 210;
+      const pdfPageHeight = 297;
+      const imgHeight = (canvas.height * pdfWidth) / canvas.width;
+
+      if (imgHeight <= pdfPageHeight) {
+        pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, imgHeight);
+      } else {
+        let heightLeft = imgHeight;
+        let position = 0;
+
+        pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, imgHeight);
+        heightLeft -= pdfPageHeight;
+
+        while (heightLeft > 0) {
+          position -= pdfPageHeight;
+          pdf.addPage();
+          pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, imgHeight);
+          heightLeft -= pdfPageHeight;
+        }
+      }
+
+      return pdf;
+    } catch (err) {
+      console.warn('html2canvas rendering failed, falling back to vector PDF:', err);
+    }
+  }
+
+  return generateInvoicePDFVector({ invoice, business });
+}
+
+/**
+ * Direct vector jsPDF generator fallback.
+ * Uses formatPDFCurrency to ensure safe encoding with standard 14 PDF fonts.
+ */
+export async function generateInvoicePDFVector({
   invoice,
   business,
 }: GenerateInvoicePDFParams): Promise<jsPDF> {
@@ -48,7 +165,6 @@ export async function generateInvoicePDF({
   let yPos = 14;
 
   // ── 1. HEADER ─────────────────────────────────────────────────────────────
-  // Left side: Logo & Title
   if (business?.logo_url) {
     try {
       const response = await fetch(business.logo_url);
@@ -58,7 +174,7 @@ export async function generateInvoicePDF({
         reader.onloadend = () => resolve(reader.result as string);
         reader.readAsDataURL(blob);
       });
-      doc.addImage(base64, 'AUTO', margin, yPos, 24, 24);
+      doc.addImage(base64, 'PNG', margin, yPos, 28, 22);
     } catch {
       drawDefaultLogo(doc, margin, yPos);
     }
@@ -66,87 +182,85 @@ export async function generateInvoicePDF({
     drawDefaultLogo(doc, margin, yPos);
   }
 
-  // Left side: Dark grey accent bar + INVOICE title
-  const barY = yPos + 22;
-  doc.setFillColor(74, 74, 74);
-  doc.rect(margin, barY, 12, 6, 'F');
-
+  // Right Header: Company Details
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(22);
-  doc.setTextColor(17, 24, 39);
-  doc.text('INVOICE', margin + 15, barY + 5.2);
-
-  // Right side: Company Information
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(18);
+  doc.setFontSize(20);
   doc.setTextColor(55, 65, 81);
+  const nameLines = doc.splitTextToSize(businessName, 100) as string[];
+  doc.text(nameLines, pageWidth - margin, yPos + 6, { align: 'right' });
 
-  const nameParts = businessName.split(' ');
-  if (nameParts.length >= 2) {
-    doc.text(nameParts[0], pageWidth - margin, yPos + 6, { align: 'right' });
-    doc.text(nameParts.slice(1).join(' '), pageWidth - margin, yPos + 13, { align: 'right' });
-  } else {
-    doc.text(businessName, pageWidth - margin, yPos + 8, { align: 'right' });
-  }
-
+  const companyDetailsY = yPos + 8 + nameLines.length * 7;
   doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Add. : ${address}`, pageWidth - margin, companyDetailsY, { align: 'right' });
+  doc.text(`GST No : ${gstin}`, pageWidth - margin, companyDetailsY + 4, { align: 'right' });
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(17, 24, 39);
+  doc.text(`Phone: ${phone}   |   Email: ${email}`, pageWidth - margin, companyDetailsY + 8.5, { align: 'right' });
+
+  // Left side title: Accent block & INVOICE
+  const titleY = yPos + 28;
+  doc.setFillColor(74, 74, 74);
+  doc.rect(margin - 4, titleY - 6.5, 16, 7.5, 'F');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(19);
+  doc.setTextColor(17, 24, 39);
+  doc.text('INVOICE', margin + 15, titleY);
+
+  yPos = titleY + 12;
+
+  // ── 2. BILL TO & INVOICE METADATA ─────────────────────────────────────────
+  doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
   doc.setTextColor(75, 85, 99);
-  doc.text(`Add. : ${address}`, pageWidth - margin, yPos + 18.5, { align: 'right' });
-  doc.text(`GST No : ${gstin}`, pageWidth - margin, yPos + 22.5, { align: 'right' });
-
-  // Contact line with phone & email
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.5);
-  doc.setTextColor(17, 24, 39);
-  doc.text(`Phone: ${phone}   |   Email: ${email}`, pageWidth - margin, yPos + 27, { align: 'right' });
-
-  yPos += 37;
-
-  // ── 2. BILL TO & METADATA ────────────────────────────────────────────────
-  // Left: Bill To
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9.5);
-  doc.setTextColor(17, 24, 39);
   doc.text('To', margin, yPos);
 
-  yPos += 4.5;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.text(clientName, margin, yPos);
+  doc.setFontSize(10);
+  doc.setTextColor(17, 24, 39);
+  doc.text(clientName, margin, yPos + 4.5);
 
-  yPos += 4.2;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(100, 116, 139);
+  const clientAddrLines = doc.splitTextToSize(clientAddress, 85) as string[];
+  doc.text(clientAddrLines, margin, yPos + 9);
+
+  let clientInfoEndY = yPos + 9 + clientAddrLines.length * 3.8;
+  if (clientGstin) {
+    doc.text(`GST No : ${clientGstin}`, margin, clientInfoEndY);
+    clientInfoEndY += 4;
+  }
+
+  // Right side: Invoice no & Date
+  const metaLabelX = pageWidth - margin - 45;
+  const metaValX = pageWidth - margin;
+
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(55, 65, 81);
-  doc.text(clientAddress, margin, yPos);
+  doc.text('Invoice no :', metaLabelX, yPos + 4);
 
-  if (clientGstin) {
-    yPos += 4;
-    doc.text(`GST No : ${clientGstin}`, margin, yPos);
-  }
-
-  // Right: Invoice Meta
-  const metaRightX = pageWidth - margin;
-  const metaLabelX = pageWidth - margin - 35;
-  const metaY = yPos - 8.2;
-
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('helvetica', 'bold');
   doc.setFontSize(9.5);
   doc.setTextColor(17, 24, 39);
-  doc.text('Invoice no :', metaLabelX, metaY);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.text(invoiceNumber, metaRightX, metaY, { align: 'right' });
+  doc.text(invoiceNumber, metaValX, yPos + 4, { align: 'right' });
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9.5);
-  doc.text('Date :', metaLabelX, metaY + 5.5);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9.5);
-  doc.text(invoiceDateFormatted, metaRightX, metaY + 5.5, { align: 'right' });
+  doc.setFontSize(8.5);
+  doc.setTextColor(55, 65, 81);
+  doc.text('Date :', metaLabelX, yPos + 9.5);
 
-  yPos += 8;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(17, 24, 39);
+  doc.text(invoiceDateFormatted, metaValX, yPos + 9.5, { align: 'right' });
+
+  yPos = Math.max(clientInfoEndY, yPos + 16) + 4;
 
   // ── 3. ITEMS TABLE ───────────────────────────────────────────────────────
   const rawItems = invoice.items && invoice.items.length > 0 ? invoice.items : [
@@ -181,8 +295,8 @@ export async function generateInvoicePDF({
       String(index + 1),
       displayText,
       String(qty),
-      formatCurrency(price, currency),
-      formatCurrency(lineTotal, currency),
+      formatPDFCurrency(price, currency),
+      formatPDFCurrency(lineTotal, currency),
     ];
   });
 
@@ -214,11 +328,10 @@ export async function generateInvoicePDF({
       0: { cellWidth: 12, halign: 'left' },
       1: { cellWidth: 'auto', halign: 'left' },
       2: { cellWidth: 16, halign: 'center' },
-      3: { cellWidth: 30, halign: 'right' },
-      4: { cellWidth: 32, halign: 'right' },
+      3: { cellWidth: 32, halign: 'right' },
+      4: { cellWidth: 34, halign: 'right' },
     },
     didDrawCell: (data) => {
-      // Draw dotted separator line under body rows except the last one
       if (data.section === 'body' && data.row.index < tableBody.length - 1 && data.column.index === 4) {
         const rowY = data.cell.y + data.cell.height;
         doc.saveGraphicsState();
@@ -253,7 +366,7 @@ export async function generateInvoicePDF({
   doc.addImage(qrDataUrl, 'PNG', margin, belowTableY + 2.5, 26, 26);
 
   // Right: Summary lines
-  const sumLabelX = pageWidth - margin - 65;
+  const sumLabelX = pageWidth - margin - 70;
   const sumValX = pageWidth - margin;
   let sumY = belowTableY + 1;
 
@@ -261,23 +374,23 @@ export async function generateInvoicePDF({
   doc.setFontSize(9);
   doc.setTextColor(17, 24, 39);
   doc.text('Sub Total', sumLabelX, sumY);
-  doc.text(formatCurrency(subtotal, currency), sumValX, sumY, { align: 'right' });
+  doc.text(formatPDFCurrency(subtotal, currency), sumValX, sumY, { align: 'right' });
 
   if (taxPercent > 0) {
     sumY += 5.5;
     doc.text(`Tax ${taxPercent}%`, sumLabelX, sumY);
-    doc.text(formatCurrency(taxAmount, currency), sumValX, sumY, { align: 'right' });
+    doc.text(formatPDFCurrency(taxAmount, currency), sumValX, sumY, { align: 'right' });
   }
 
   if (discountAmount > 0) {
     sumY += 5.5;
     doc.text('Discount', sumLabelX, sumY);
-    doc.text(`-${formatCurrency(discountAmount, currency)}`, sumValX, sumY, { align: 'right' });
+    doc.text(`-${formatPDFCurrency(discountAmount, currency)}`, sumValX, sumY, { align: 'right' });
   }
 
   // GRAND TOTAL Block
   const blockY = sumY + 6;
-  const blockW = 75;
+  const blockW = 85; // Extra width to prevent digit truncation
   const blockH = 9;
   const blockX = pageWidth - margin - blockW;
 
@@ -288,7 +401,7 @@ export async function generateInvoicePDF({
   doc.setFontSize(9.5);
   doc.setTextColor(255, 255, 255);
   doc.text('GRAND TOTAL', blockX + 4, blockY + 6);
-  doc.text(formatCurrency(grandTotal, currency), blockX + blockW - 4, blockY + 6, { align: 'right' });
+  doc.text(formatPDFCurrency(grandTotal, currency), blockX + blockW - 4, blockY + 6, { align: 'right' });
 
   // ── 5. TERMS, WARRANTY & SIGNATURE ───────────────────────────────────────
   const termsY = Math.max(belowTableY + 33, blockY + 16);
@@ -321,11 +434,10 @@ export async function generateInvoicePDF({
   const warrantyLines = doc.splitTextToSize(warrantyText, leftColWidth) as string[];
   doc.text(warrantyLines, margin, warrantyY + 4);
 
-  // Right column: Cursive signature, Name & Properator
-  const sigX = pageWidth - margin - 22;
-  const sigY = termsY + 6;
+  // Right column: Signature block
+  const sigX = pageWidth - margin - 35;
+  const sigY = termsY + 8;
 
-  // Cursive signature (Adeline Palmerston)
   doc.setFont('times', 'italic');
   doc.setFontSize(16);
   doc.setTextColor(100, 100, 100);
@@ -338,7 +450,7 @@ export async function generateInvoicePDF({
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
-  doc.setTextColor(59, 130, 246); // Blue color for designation
+  doc.setTextColor(59, 130, 246);
   doc.text(DEFAULT_SIGNATORY_ROLE, sigX, sigY + 10.5, { align: 'center' });
 
   // ── 6. FOOTER ────────────────────────────────────────────────────────────
@@ -349,13 +461,6 @@ export async function generateInvoicePDF({
   doc.setLineWidth(0.3);
   doc.line(margin, footerY - 5, pageWidth - margin, footerY - 5);
 
-  // Electronics icon text / vector representations on left
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
-  doc.setTextColor(55, 65, 81);
-  doc.text('[CCTV]   [DISH]   [AUDIO]   [TV]   [WI-FI]', margin, footerY + 2);
-
-  // Blue cursive script on right
   doc.setFont('times', 'italic');
   doc.setFontSize(13);
   doc.setTextColor(59, 130, 246);
@@ -372,10 +477,8 @@ function drawDefaultLogo(doc: jsPDF, x: number, y: number) {
   doc.setDrawColor(17, 24, 39);
   doc.setLineWidth(1.2);
 
-  // Outer swoosh curve
   doc.ellipse(x + 12, y + 10, 14, 7, 'S');
 
-  // Center "ME" letters
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(18);
   doc.setTextColor(17, 24, 39);

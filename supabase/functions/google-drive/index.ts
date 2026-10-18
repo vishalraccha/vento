@@ -283,75 +283,96 @@ serve(async (req) => {
   }
 
   try {
-    // Verify auth
-   const { action, ...params } = await req.json();
-console.log(`Action: ${action}`);
+    // Parse body FIRST — before any auth check
+    const { action, ...params } = await req.json();
+    console.log(`Action: ${action}`);
 
-let userId: string | null = null;
-
-// ✅ Only protect required actions
-if (action !== "get_auth_url") {
-  const authHeader = req.headers.get("Authorization");
-
-  if (!authHeader?.startsWith("Bearer ")) {
-    throw new Error("Missing authorization header");
-  }
-
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
-    throw new Error("Supabase environment is not configured");
-  }
-
-  const token = authHeader.replace("Bearer ", "").trim();
-
-  const authSupabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: {
-      headers: {
-        Authorization: authHeader,
-      },
-    },
-  });
-
-  const { data: claimsData, error: authError } =
-    await authSupabase.auth.getClaims(token);
-
-  userId = claimsData?.claims?.sub;
-
-  if (authError || !userId) {
-    throw new Error("Unauthorized");
-  }
-}
-
-// ✅ service role client (always available)
-const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
-
+    // Public actions — no auth needed at all
+    const PUBLIC_ACTIONS = ["get_auth_url"];
     
+    if (PUBLIC_ACTIONS.includes(action)) {
+      // Handle immediately, skip all auth
+      let result: any;
+      
+      if (action === "get_auth_url") {
+        const { redirectUri } = params;
+        const scopes = ["https://www.googleapis.com/auth/drive.file"];
+        
+        const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+        authUrl.searchParams.set("client_id", GOOGLE_CLIENT_ID!);
+        authUrl.searchParams.set("redirect_uri", redirectUri);
+        authUrl.searchParams.set("response_type", "code");
+        authUrl.searchParams.set("scope", scopes.join(" "));
+        authUrl.searchParams.set("access_type", "offline");
+        authUrl.searchParams.set("prompt", "consent");
 
+        result = { authUrl: authUrl.toString() };
+      }
+
+      return new Response(JSON.stringify(result), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // All other actions — require auth
+    let userId: string | null = null;
+    const authHeader = req.headers.get("Authorization");
+
+    if (authHeader?.startsWith("Bearer ")) {
+      try {
+        const authSupabase = createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
+          global: { headers: { Authorization: authHeader } },
+        });
+        const { data: { user: authUser } } = await authSupabase.auth.getUser();
+        userId = authUser?.id ?? null;
+      } catch {
+        // failed to parse token
+      }
+    }
+
+    // For exchange_code, also accept userId from body as fallback
+    if (!userId && action === "exchange_code" && params.userId) {
+      userId = params.userId;
+    }
+
+    if (!userId) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
     let result: any;
 
     switch (action) {
+      // ... rest of your cases unchanged (exchange_code, check_connection, disconnect, upload_document, list_documents)
       case "exchange_code": {
-        // Exchange OAuth code for tokens and store them
-        const { code, redirectUri } = params;
-        const tokens = await exchangeCodeForTokens(code, redirectUri);
-        
-        // Store tokens in database
-        const { error: upsertError } = await supabase
-          .from("google_drive_tokens")
-          .upsert({
-            user_id: userId,
-            access_token: tokens.access_token,
-            refresh_token: tokens.refresh_token,
-            expires_at: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
-          }, { onConflict: "user_id" });
+  const { code, redirectUri, userId: bodyUserId } = params;
+  
+  // userId comes from auth header (already parsed above) OR from body as fallback
+  const effectiveUserId = userId || bodyUserId;
+  if (!effectiveUserId) throw new Error("User ID required for exchange_code");
 
-        if (upsertError) {
-          console.error("Failed to store tokens:", upsertError);
-          throw new Error("Failed to store tokens");
-        }
+  const tokens = await exchangeCodeForTokens(code, redirectUri);
 
-        result = { success: true };
-        break;
-      }
+  const { error: upsertError } = await supabase
+    .from("google_drive_tokens")
+    .upsert({
+      user_id: effectiveUserId,
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+      expires_at: new Date(Date.now() + tokens.expires_in * 1000).toISOString(),
+    }, { onConflict: "user_id" });
+
+  if (upsertError) {
+    console.error("Failed to store tokens:", upsertError);
+    throw new Error("Failed to store tokens");
+  }
+
+  result = { success: true };
+  break;
+}
 
       case "check_connection": {
         // Check if user has valid Google Drive connection

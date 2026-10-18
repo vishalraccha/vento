@@ -16,13 +16,14 @@ export default function AuthCallback() {
     const code = searchParams.get('code');
 
     if (code) {
+      window.history.replaceState({}, '', window.location.pathname);
       // ✅ Google Drive OAuth callback
       handleCallback(code).then(() => navigate('/documents', { replace: true }));
     } else {
       // Normal Supabase auth callback (email/password login)
       navigate('/', { replace: true });
     }
-  }, []);
+  }, [handleCallback, navigate, searchParams]);
 
   return (
     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>

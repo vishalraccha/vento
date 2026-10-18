@@ -36,12 +36,14 @@ import {
   Phone,
   Mail,
   MapPin,
+  CreditCard,
 } from 'lucide-react';
 import { useInvoices } from '@/hooks/useInvoices';
 import { useBusiness } from '@/hooks/useBusiness';
 import { downloadInvoicePDF, getInvoicePDFBlob } from '@/lib/pdf';
 import { ShareDialog } from '@/components/sharing';
-import { format } from 'date-fns';
+import { RecordPaymentDialog } from '@/components/invoices/RecordPaymentDialog';
+import { formatSafeDate } from '@/lib/dateUtils';
 import { useToast } from '@/hooks/use-toast';
 
 export default function InvoiceDetail() {
@@ -55,6 +57,7 @@ export default function InvoiceDetail() {
   
   const [showShareDialog, setShowShareDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showPaymentDialog, setShowPaymentDialog] = useState(false);
 
   const handleDownloadPDF = async () => {
   if (!invoice) return;
@@ -223,15 +226,13 @@ const handleViewPDF = async () => {
                 <div>
                   <p className="text-muted-foreground">Invoice Date</p>
                   <p className="font-medium">
-                    {format(new Date(invoice.invoice_date), 'dd MMM yyyy')}
+                    {formatSafeDate(invoice.invoice_date)}
                   </p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Due Date</p>
                   <p className="font-medium">
-                    {invoice.due_date
-                      ? format(new Date(invoice.due_date), 'dd MMM yyyy')
-                      : 'Not set'}
+                    {invoice.due_date ? formatSafeDate(invoice.due_date) : 'Not set'}
                   </p>
                 </div>
               </div>
@@ -420,22 +421,41 @@ const handleViewPDF = async () => {
             </Button>
             
             {invoice.status !== 'paid' && (
-              <Button
-                className="flex-1"
-                onClick={handleMarkAsPaid}
-                disabled={updateInvoiceStatus.isPending}
-              >
-                {updateInvoiceStatus.isPending ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <CheckCircle className="mr-2 h-4 w-4" />
-                )}
-                Paid
-              </Button>
+              <>
+                <Button
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+                  onClick={() => setShowPaymentDialog(true)}
+                >
+                  <CreditCard className="mr-2 h-4 w-4" />
+                  Record Payment
+                </Button>
+                
+                <Button
+                  variant="outline"
+                  className="flex-1 border-emerald-500/30 text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                  onClick={handleMarkAsPaid}
+                  disabled={updateInvoiceStatus.isPending}
+                >
+                  {updateInvoiceStatus.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <CheckCircle className="mr-2 h-4 w-4" />
+                  )}
+                  Quick Paid
+                </Button>
+              </>
             )}
           </div>
         </div>
       </div>
+
+      {/* Record Payment Dialog */}
+      <RecordPaymentDialog
+        open={showPaymentDialog}
+        onOpenChange={setShowPaymentDialog}
+        invoice={invoice}
+        updateInvoiceStatus={updateInvoiceStatus}
+      />
 
       {/* Share Dialog */}
       <ShareDialog

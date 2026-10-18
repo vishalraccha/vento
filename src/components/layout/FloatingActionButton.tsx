@@ -1,10 +1,11 @@
+import React from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 interface FloatingActionButtonProps {
   onClick?: () => void;
-  icon?: React.ReactNode;
+  icon?: React.ReactNode | React.ComponentType<{ className?: string }>;
   className?: string;
   label?: string;
 }
@@ -15,6 +16,12 @@ export function FloatingActionButton({
   className,
   label = "Create new"
 }: FloatingActionButtonProps) {
+  const renderedIcon = React.isValidElement(icon)
+    ? icon
+    : typeof icon === 'function'
+    ? React.createElement(icon as React.ComponentType<{ className?: string }>, { className: "h-6 w-6" })
+    : <Plus className="h-6 w-6" />;
+
   return (
     <Button
       onClick={onClick}
@@ -26,7 +33,7 @@ export function FloatingActionButton({
         className
       )}
     >
-      {icon}
+      {renderedIcon}
       <span className="sr-only">{label}</span>
     </Button>
   );

@@ -6,19 +6,52 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+
+# Dependencies and build output
 node_modules
 dist
 dist-ssr
 *.local
 
-# Editor directories and files
+# Environment variables & secrets (never commit)
 .env
+.env.*
+*.env
+!.env.example
+
+# OAuth client secrets, service account credentials & API keys
+client_secret*.json
+*secret*.json
+*credentials*.json
+google-services.json
+serviceAccountKey*.json
+service-account*.json
+
+# SSL / Private keys & certificates
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Supabase local state & generated temp files
+supabase/.temp
+supabase/.temp/*
+supabase/.branches
+supabase/.env*
+
+# Editor directories and OS files
 .vscode/*
 !.vscode/extensions.json
 .idea
 .DS_Store
+Thumbs.db
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+client_secret_*.json
+.env
+.env.*
+!.env.example

@@ -26,7 +26,7 @@ import { useGoogleDrive } from '@/hooks/useGoogleDrive';
 import { downloadInvoicePDF, getInvoicePDFBlob } from '@/lib/pdf/generateInvoicePDF';
 import { downloadQuotationPDF, getQuotationPDFBlob } from '@/lib/pdf/generateQuotationPDF';
 import { ShareDialog } from '@/components/sharing';
-import { format } from 'date-fns';
+import { formatSafeDate } from '@/lib/dateUtils';
 import { useToast } from '@/hooks/use-toast';
 
 interface Document {
@@ -64,14 +64,15 @@ export default function Documents() {
   const isLoading = invoicesLoading || quotationsLoading;
 
   // Handle OAuth callback
+  const callbackHandledRef = useRef(false);
   useEffect(() => {
     const code = searchParams.get('code');
-    if (code) {
-      handleCallback(code).then((success) => {
-        if (success) {
-          setSearchParams({});
-        }
-      });
+    if (code && !callbackHandledRef.current) {
+      callbackHandledRef.current = true;
+      // Clean query params from URL immediately
+      window.history.replaceState({}, '', window.location.pathname);
+      setSearchParams({}, { replace: true });
+      handleCallback(code);
     }
   }, [searchParams, handleCallback, setSearchParams]);
 
@@ -81,8 +82,16 @@ export default function Documents() {
     autoSyncDoneRef.current = true;
 
     const allDocs = [
-      ...invoices.map(inv => ({ type: 'invoice' as const, data: inv, number: inv.invoice_number })),
-      ...quotations.map(qt => ({ type: 'quotation' as const, data: qt, number: qt.quotation_number })),
+      ...(invoicesWithItems.length > 0 ? invoicesWithItems : invoices).map(inv => ({
+        type: 'invoice' as const,
+        data: inv,
+        number: inv.invoice_number
+      })),
+      ...(quotationsWithItems.length > 0 ? quotationsWithItems : quotations).map(qt => ({
+        type: 'quotation' as const,
+        data: qt,
+        number: qt.quotation_number
+      })),
     ];
 
     for (const doc of allDocs) {
@@ -110,7 +119,7 @@ export default function Documents() {
         // Silently skip failed uploads during auto-sync
       }
     }
-  }, [isConnected, isLoading, invoices, quotations, business, uploadDocument]);
+  }, [isConnected, isLoading, invoices, invoicesWithItems, quotations, quotationsWithItems, business, uploadDocument]);
 
   useEffect(() => {
     autoSyncToDrive();
@@ -151,9 +160,9 @@ export default function Documents() {
     return matchesSearch && matchesTab;
   });
 
-  // Group by month
+  // Group by month safely
   const groupedByMonth = filteredDocuments.reduce((acc, doc) => {
-    const monthKey = format(new Date(doc.date), 'MMMM yyyy');
+    const monthKey = formatSafeDate(doc.date, 'MMMM yyyy');
     if (!acc[monthKey]) acc[monthKey] = [];
     acc[monthKey].push(doc);
     return acc;
@@ -316,7 +325,7 @@ const handleViewPDF = async (doc: Document) => {
                               </Badge>
                             </div>
                             <p className="text-xs text-muted-foreground">
-                              {doc.clientName || 'No client'} • {format(new Date(doc.date), 'dd MMM yyyy')}
+                              {doc.clientName || 'Walk-in / Direct Client'} • {formatSafeDate(doc.date)}
                             </p>
                           </div>
                           

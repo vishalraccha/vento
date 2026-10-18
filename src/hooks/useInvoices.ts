@@ -5,6 +5,8 @@ import { Invoice, InvoiceItem } from '@/types/database';
 import { useToast } from '@/hooks/use-toast';
 import { useRealtimeSubscription } from './useRealtimeSubscription';
 import { useBusiness } from './useBusiness';
+import { extractDocumentSequenceNumber } from '@/lib/documentNumber';
+import { deduplicateUserDocuments } from '@/lib/deduplicateDocuments';
 
 export function useInvoices() {
   const { user } = useAuth();
@@ -25,6 +27,21 @@ export function useInvoices() {
         .order('created_at', { ascending: false });
       
       if (error) throw error;
+
+      // Auto-detect and resolve any legacy duplicate numbers
+      if (data && data.length > 1) {
+        const numbers = data.map(i => i.invoice_number);
+        if (new Set(numbers).size !== numbers.length) {
+          deduplicateUserDocuments(user.id).then(changed => {
+            if (changed) {
+              queryClient.invalidateQueries({ queryKey: ['invoices'] });
+              queryClient.invalidateQueries({ queryKey: ['quotations'] });
+              queryClient.invalidateQueries({ queryKey: ['businesses'] });
+            }
+          });
+        }
+      }
+
       return data as Invoice[];
     },
     enabled: !!user,
@@ -82,7 +99,7 @@ export function useInvoices() {
       
       if (invoiceError) throw invoiceError;
       
-      // Create invoice items
+      // Create invoice items and adjust stock
       if (items.length > 0) {
         const itemsWithInvoiceId = items.map((item, index) => ({
           ...item,
@@ -95,15 +112,43 @@ export function useInvoices() {
           .insert(itemsWithInvoiceId);
         
         if (itemsError) throw itemsError;
+
+        // Deduct inventory stock
+        for (const item of items) {
+          if (item.inventory_item_id && Number(item.quantity) > 0) {
+            try {
+              const { data: invItem } = await supabase
+                .from('inventory_items')
+                .select('stock_quantity, is_service')
+                .eq('id', item.inventory_item_id)
+                .single();
+
+              if (invItem && !invItem.is_service && typeof invItem.stock_quantity === 'number') {
+                const newStock = Math.max(0, invItem.stock_quantity - Number(item.quantity));
+                await supabase
+                  .from('inventory_items')
+                  .update({ stock_quantity: newStock })
+                  .eq('id', item.inventory_item_id);
+              }
+            } catch {
+              // Non-blocking stock update
+            }
+          }
+        }
       }
 
-      // Increment invoice number counter
-      await incrementInvoiceNumber.mutateAsync();
+      // Increment invoice number counter with actual sequence number
+      const seq = extractDocumentSequenceNumber(invoice.invoice_number);
+      await incrementInvoiceNumber.mutateAsync(seq);
       
       return invoiceData as Invoice;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['invoices-with-items'] });
+      queryClient.invalidateQueries({ queryKey: ['businesses'] });
+      queryClient.invalidateQueries({ queryKey: ['business'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
       toast({ title: 'Invoice created successfully' });
     },
     onError: (error) => {
@@ -200,6 +245,9 @@ export function useInvoices() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
       queryClient.invalidateQueries({ queryKey: ['invoice'] });
+      queryClient.invalidateQueries({ queryKey: ['invoices-with-items'] });
+      queryClient.invalidateQueries({ queryKey: ['businesses'] });
+      queryClient.invalidateQueries({ queryKey: ['business'] });
       toast({ title: 'Invoice status updated' });
     },
     onError: (error) => {
@@ -228,6 +276,7 @@ export function useInvoices() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      queryClient.invalidateQueries({ queryKey: ['invoices-with-items'] });
       toast({ title: 'Invoice deleted successfully' });
     },
     onError: (error) => {
@@ -255,13 +304,25 @@ export function useInvoices() {
     );
   };
 
-  // Calculate stats
+  // Calculate stats accurately
   const stats = {
     totalInvoices: invoicesQuery.data?.length ?? 0,
-    paidAmount: invoicesQuery.data?.filter(i => i.status === 'paid').reduce((sum, i) => sum + Number(i.total_amount), 0) ?? 0,
-    pendingAmount: invoicesQuery.data?.filter(i => ['sent', 'pending', 'draft'].includes(i.status)).reduce((sum, i) => sum + Number(i.total_amount) - Number(i.amount_paid || 0), 0) ?? 0,
-    overdueCount: invoicesQuery.data?.filter(i => i.status === 'overdue').length ?? 0,
-    draftCount: invoicesQuery.data?.filter(i => i.status === 'draft').length ?? 0,
+    paidAmount: (invoicesQuery.data ?? []).reduce((sum, i) => {
+      if (i.status === 'paid') return sum + Number(i.total_amount || 0);
+      return sum + Number(i.amount_paid || 0);
+    }, 0),
+    pendingAmount: (invoicesQuery.data ?? []).reduce((sum, i) => {
+      if (i.status === 'paid') return sum;
+      const total = Number(i.total_amount || 0);
+      const paid = Number(i.amount_paid || 0);
+      return sum + Math.max(0, total - paid);
+    }, 0),
+    overdueCount: (invoicesQuery.data ?? []).filter(i => {
+      if (i.status === 'overdue') return true;
+      if (i.status !== 'paid' && i.due_date && new Date(i.due_date) < new Date()) return true;
+      return false;
+    }).length,
+    draftCount: (invoicesQuery.data ?? []).filter(i => i.status === 'draft').length,
   };
 
   // Get recent invoices

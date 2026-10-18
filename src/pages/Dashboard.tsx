@@ -15,7 +15,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { useInvoices } from '@/hooks/useInvoices';
 import { useBusiness } from '@/hooks/useBusiness';
-import { format } from 'date-fns';
+import { formatSafeDate } from '@/lib/dateUtils';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -155,9 +155,9 @@ export default function Dashboard() {
                     className="flex cursor-pointer items-center justify-between rounded-lg border p-3 transition-colors hover:bg-muted/50"
                   >
                     <div className="space-y-1">
-                      <p className="font-medium">{invoice.client_name || 'No client'}</p>
+                      <p className="font-medium">{invoice.client_name || 'Walk-in / Direct Client'}</p>
                       <p className="text-sm text-muted-foreground">
-                        {invoice.invoice_number} • {format(new Date(invoice.invoice_date), 'dd MMM yyyy')}
+                        {invoice.invoice_number} • {formatSafeDate(invoice.invoice_date)}
                       </p>
                     </div>
                     <div className="text-right">
@@ -181,15 +181,18 @@ export default function Dashboard() {
 
         {/* Pending Payments */}
         <Card>
-          <CardHeader className="pb-3">
+          <CardHeader className="pb-3 flex flex-row items-center justify-between">
             <CardTitle className="text-base font-semibold">Pending Payments</CardTitle>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/invoices')}>
+              View Invoices
+            </Button>
           </CardHeader>
           <CardContent>
-            {invoices.filter(i => ['sent', 'overdue'].includes(i.status)).length > 0 ? (
+            {invoices.filter(i => i.status !== 'paid' && (Number(i.total_amount) - Number(i.amount_paid || 0)) > 0).length > 0 ? (
               <div className="space-y-3">
                 {invoices
-                  .filter(i => ['sent', 'overdue'].includes(i.status))
-                  .slice(0, 3)
+                  .filter(i => i.status !== 'paid' && (Number(i.total_amount) - Number(i.amount_paid || 0)) > 0)
+                  .slice(0, 4)
                   .map((invoice) => (
                     <div
                       key={invoice.id}
@@ -197,14 +200,14 @@ export default function Dashboard() {
                       className="flex cursor-pointer items-center justify-between rounded-lg border p-3 transition-colors hover:bg-muted/50"
                     >
                       <div className="space-y-1">
-                        <p className="font-medium">{invoice.client_name || 'No client'}</p>
+                        <p className="font-medium">{invoice.client_name || 'Walk-in / Direct Client'}</p>
                         <p className="text-sm text-muted-foreground">
-                          Due: {invoice.due_date ? format(new Date(invoice.due_date), 'dd MMM yyyy') : 'N/A'}
+                          Due: {invoice.due_date ? formatSafeDate(invoice.due_date) : 'On receipt'}
                         </p>
                       </div>
                       <div className="text-right">
-                        <p className="font-semibold text-warning">
-                          ₹{(Number(invoice.total_amount) - Number(invoice.amount_paid)).toLocaleString('en-IN')}
+                        <p className="font-semibold text-amber-600 dark:text-amber-400">
+                          ₹{(Number(invoice.total_amount) - Number(invoice.amount_paid || 0)).toLocaleString('en-IN')}
                         </p>
                         {getStatusBadge(invoice.status)}
                       </div>

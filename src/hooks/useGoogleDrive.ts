@@ -1,18 +1,36 @@
-import { useState, useCallback, useRef } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useAuth } from '@/contexts/AuthContext';
-import { useToast } from '@/hooks/use-toast';
-import { useBusiness } from './useBusiness';
+import { useState, useCallback, useRef } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/hooks/use-toast";
+import { useBusiness } from "./useBusiness";
 
-const FUNCTION_URL = 'https://qkbibprgxcmlgyspthha.supabase.co/functions/v1/google-oauth';
+const SUPABASE_BASE_URL = 
+  import.meta.env.VITE_SUPABASE_URL || "https://fvhjvphazrpanoqmsqvv.supabase.co";
+const OAUTH_FUNCTION_URL = `${SUPABASE_BASE_URL}/functions/v1/google-oauth`;
+const DRIVE_FUNCTION_URL = `${SUPABASE_BASE_URL}/functions/v1/google-drive`;
+const SUPABASE_ANON_KEY = 
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ2aGp2cGhhenJwYW5vcW1zcXZ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyMjQ4MjksImV4cCI6MjA4ODgwMDgyOX0.A9eu28EbxERdoUw1t-F3n_mjsO5TpOzoU7SCYT3696A";
 
-// ✅ FIXED: Use /auth/callback — this matches Google Console registered URI
-const getRedirectUri = () =>
-  "https://qkbibprgxcmlgyspthha.supabase.co/functions/v1/google-oauth";
+const getRedirectUri = () => OAUTH_FUNCTION_URL;
+
+// ── Shared header helpers ─────────────────────────────────────────────────────
+
+const publicHeaders = {
+  "Content-Type": "application/json",
+  "apikey": SUPABASE_ANON_KEY,
+};
+
+const authHeaders = (token: string) => ({
+  "Content-Type": "application/json",
+  "apikey": SUPABASE_ANON_KEY,
+  "Authorization": `Bearer ${token}`,
+});
+
+// ── Local cache helpers ───────────────────────────────────────────────────────
 
 function getUploadedFiles(): Set<string> {
   try {
-    const stored = localStorage.getItem('vento_uploaded_drive_files');
+    const stored = localStorage.getItem("vento_uploaded_drive_files");
     return new Set(stored ? JSON.parse(stored) : []);
   } catch {
     return new Set();
@@ -22,8 +40,10 @@ function getUploadedFiles(): Set<string> {
 function markFileUploaded(fileName: string) {
   const files = getUploadedFiles();
   files.add(fileName);
-  localStorage.setItem('vento_uploaded_drive_files', JSON.stringify([...files]));
+  localStorage.setItem("vento_uploaded_drive_files", JSON.stringify([...files]));
 }
+
+// ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useGoogleDrive() {
   const { user, session } = useAuth();
@@ -33,154 +53,164 @@ export function useGoogleDrive() {
   const [isConnecting, setIsConnecting] = useState(false);
   const uploadingFilesRef = useRef<Set<string>>(new Set());
 
+  // ── Check connection status ─────────────────────────────────────────────
   const connectionQuery = useQuery({
-    queryKey: ['google-drive-connection', user?.id],
+    queryKey: ["google-drive-connection", user?.id],
     queryFn: async () => {
       if (!session?.access_token) return { connected: false };
 
-      const response = await fetch(FUNCTION_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ action: 'check_connection' }),
+      const response = await fetch(DRIVE_FUNCTION_URL, {
+        method: "POST",
+        headers: authHeaders(session.access_token),
+        body: JSON.stringify({ action: "check_connection" }),
       });
 
       if (!response.ok) {
-        console.error('Check connection error:', await response.json());
+        console.error("Check connection error:", await response.text());
         return { connected: false };
       }
 
       return await response.json();
     },
-    enabled: !!user && !!session,
+    enabled: !!session?.access_token,
+    retry: false,
     staleTime: 1000 * 60 * 5,
   });
 
-  const connect = useCallback(async () => {
-    if (!session?.access_token) {
-      toast({
-        variant: 'destructive',
-        title: 'Not logged in',
-        description: 'Please log in to connect Google Drive.',
-      });
-      return;
+  // ── Connect — get Google OAuth URL ─────────────────────────────────────
+ const connect = useCallback(async () => {
+  if (!session?.access_token) {
+    toast({ variant: "destructive", title: "Not logged in" });
+    return;
+  }
+
+  setIsConnecting(true);
+
+  try {
+    const redirectUri = getRedirectUri();
+
+    const response = await fetch(OAUTH_FUNCTION_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": `Bearer ${session.access_token}`, // ← send both
+      },
+      body: JSON.stringify({ redirectUri, frontendOrigin: window.location.origin }),
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      console.error("get_auth_url error:", err);
+      throw new Error("Failed to get auth URL");
     }
 
-    setIsConnecting(true);
+    const { authUrl } = await response.json();
+    localStorage.setItem("google_drive_redirect_uri", redirectUri);
+    window.location.href = authUrl;
+  } catch (error: any) {
+    console.error("Connect error:", error);
+    toast({ variant: "destructive", title: "Connection failed", description: error.message });
+    setIsConnecting(false);
+  }
+}, [session, toast]);
 
-    try {
-      // ✅ FIXED: redirectUri now matches Google Console
-      const redirectUri = getRedirectUri();
+const inFlightCodes = new Set<string>();
+const handledCodes = new Set<string>();
 
-      const response = await fetch(FUNCTION_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          action: 'get_auth_url',
-          redirectUri,          // ✅ sends /auth/callback to your Edge Function
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to get auth URL');
+  // ── Handle OAuth callback — exchange code for tokens ───────────────────
+  const handleCallback = useCallback(
+    async (code: string) => {
+      if (!session?.access_token || !user?.id) return false;
+      if (!code || inFlightCodes.has(code) || handledCodes.has(code)) {
+        return true;
       }
 
-      const { authUrl } = await response.json();
+      inFlightCodes.add(code);
 
-      // ✅ Store the correct redirectUri for the callback step
-      localStorage.setItem('google_drive_redirect_uri', redirectUri);
+      try {
+        const redirectUri =
+          localStorage.getItem("google_drive_redirect_uri") || getRedirectUri();
 
-      window.location.href = authUrl;
-    } catch (error: any) {
-      console.error('Connect error:', error);
-      toast({
-        variant: 'destructive',
-        title: 'Connection failed',
-        description: error.message || 'Failed to connect to Google Drive.',
-      });
-      setIsConnecting(false);
-    }
-  }, [session, toast]);
+        const response = await fetch(DRIVE_FUNCTION_URL, {
+          method: "POST",
+          headers: authHeaders(session.access_token),
+          body: JSON.stringify({
+            action: "exchange_code",
+            code,
+            redirectUri,
+            userId: user.id,
+          }),
+        });
 
-  // ✅ handleCallback stays the same — it reads redirectUri from localStorage
-  const handleCallback = useCallback(async (code: string) => {
-    if (!session?.access_token) return false;
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          const errMsg = errorData.error || "";
 
-    try {
-      const redirectUri = localStorage.getItem('google_drive_redirect_uri') || getRedirectUri();
+          // If it's invalid_grant, check if user is already connected
+          if (errMsg.includes("invalid_grant")) {
+            // Already connected or code already used
+            queryClient.invalidateQueries({ queryKey: ["google-drive-connection"] });
+            handledCodes.add(code);
+            return true;
+          }
 
-      const response = await fetch(FUNCTION_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          action: 'exchange_code',
-          code,
-          redirectUri,          // ✅ must match what was sent in get_auth_url
-        }),
-      });
+          throw new Error(errMsg || "Failed to exchange code");
+        }
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to exchange code');
+        handledCodes.add(code);
+        localStorage.removeItem("google_drive_redirect_uri");
+        queryClient.invalidateQueries({ queryKey: ["google-drive-connection"] });
+
+        toast({
+          title: "Connected!",
+          description: "Google Drive has been connected successfully.",
+        });
+
+        return true;
+      } catch (error: any) {
+        console.error("Callback error:", error);
+        toast({
+          variant: "destructive",
+          title: "Connection failed",
+          description: error.message || "Failed to complete Google Drive connection.",
+        });
+        return false;
+      } finally {
+        inFlightCodes.delete(code);
       }
+    },
+    [session, user, toast, queryClient],
+  );
 
-      localStorage.removeItem('google_drive_redirect_uri');
-      queryClient.invalidateQueries({ queryKey: ['google-drive-connection'] });
-
-      toast({
-        title: 'Connected!',
-        description: 'Google Drive has been connected successfully.',
-      });
-
-      return true;
-    } catch (error: any) {
-      console.error('Callback error:', error);
-      toast({
-        variant: 'destructive',
-        title: 'Connection failed',
-        description: error.message || 'Failed to complete Google Drive connection.',
-      });
-      return false;
-    }
-  }, [session, toast, queryClient]);
-
+  // ── Disconnect ──────────────────────────────────────────────────────────
   const disconnect = useMutation({
     mutationFn: async () => {
-      if (!session?.access_token) throw new Error('Not authenticated');
+      if (!session?.access_token) throw new Error("Not authenticated");
 
-      const response = await fetch(FUNCTION_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ action: 'disconnect' }),
+      const response = await fetch(DRIVE_FUNCTION_URL, {
+        method: "POST",
+        headers: authHeaders(session.access_token),
+        body: JSON.stringify({ action: "disconnect" }),
       });
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || 'Failed to disconnect');
+        throw new Error(error.error || "Failed to disconnect");
       }
 
       return await response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['google-drive-connection'] });
-      toast({ title: 'Disconnected', description: 'Google Drive has been disconnected.' });
+      queryClient.invalidateQueries({ queryKey: ["google-drive-connection"] });
+      toast({ title: "Disconnected", description: "Google Drive has been disconnected." });
     },
     onError: (error: any) => {
-      toast({ variant: 'destructive', title: 'Disconnect failed', description: error.message });
+      toast({ variant: "destructive", title: "Disconnect failed", description: error.message });
     },
   });
 
+  // ── Upload document ─────────────────────────────────────────────────────
   const uploadDocument = useMutation({
     mutationFn: async ({
       fileName,
@@ -189,40 +219,38 @@ export function useGoogleDrive() {
     }: {
       fileName: string;
       fileContent: string;
-      documentType: 'invoice' | 'quotation';
+      documentType: "invoice" | "quotation";
     }) => {
-      if (!session?.access_token) throw new Error('Not authenticated');
+      if (!session?.access_token) throw new Error("Not authenticated");
 
+      // Prevent duplicate in-flight uploads
       if (uploadingFilesRef.current.has(fileName)) {
-        return { success: true, alreadyExists: true, message: 'Upload already in progress' };
+        return { success: true, alreadyExists: true, message: "Upload already in progress" };
       }
 
-      const alreadyUploaded = getUploadedFiles();
-      if (alreadyUploaded.has(fileName)) {
-        return { success: true, alreadyExists: true, message: 'Document already synced to Google Drive' };
+      // Prevent re-uploading already synced files
+      if (getUploadedFiles().has(fileName)) {
+        return { success: true, alreadyExists: true, message: "Document already synced to Google Drive" };
       }
 
       uploadingFilesRef.current.add(fileName);
 
       try {
-        const response = await fetch(FUNCTION_URL, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.access_token}`,
-          },
+        const response = await fetch(DRIVE_FUNCTION_URL, {
+          method: "POST",
+          headers: authHeaders(session.access_token),
           body: JSON.stringify({
-            action: 'upload_document',
+            action: "upload_document",
             fileName,
             fileContent,
             documentType,
-            businessName: business?.business_name || 'My Business',
+            businessName: business?.business_name || "My Business",
           }),
         });
 
         if (!response.ok) {
           const error = await response.json();
-          throw new Error(error.error || 'Failed to upload');
+          throw new Error(error.error || "Failed to upload");
         }
 
         const data = await response.json();
@@ -234,39 +262,40 @@ export function useGoogleDrive() {
     },
     onSuccess: (data) => {
       if (data.alreadyExists) {
-        toast({ title: 'Already synced', description: 'This document has already been uploaded to Google Drive.' });
+        toast({ title: "Already synced", description: "This document has already been uploaded to Google Drive." });
       } else {
-        toast({ title: 'Uploaded to Google Drive', description: 'Document has been saved to your Google Drive.' });
+        toast({ title: "Uploaded to Google Drive", description: "Document has been saved to your Google Drive." });
       }
     },
     onError: (error: any) => {
-      toast({ variant: 'destructive', title: 'Upload failed', description: error.message });
+      toast({ variant: "destructive", title: "Upload failed", description: error.message });
     },
   });
 
-  const listDocuments = useCallback(async (documentType: 'invoice' | 'quotation') => {
-    if (!session?.access_token) throw new Error('Not authenticated');
+  // ── List documents ──────────────────────────────────────────────────────
+  const listDocuments = useCallback(
+    async (documentType: "invoice" | "quotation") => {
+      if (!session?.access_token) throw new Error("Not authenticated");
 
-    const response = await fetch(FUNCTION_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({
-        action: 'list_documents',
-        documentType,
-        businessName: business?.business_name || 'My Business',
-      }),
-    });
+      const response = await fetch(DRIVE_FUNCTION_URL, {
+        method: "POST",
+        headers: authHeaders(session.access_token),
+        body: JSON.stringify({
+          action: "list_documents",
+          documentType,
+          businessName: business?.business_name || "My Business",
+        }),
+      });
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to list documents');
-    }
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to list documents");
+      }
 
-    return await response.json();
-  }, [session, business]);
+      return await response.json();
+    },
+    [session, business],
+  );
 
   return {
     isConnected: connectionQuery.data?.connected ?? false,

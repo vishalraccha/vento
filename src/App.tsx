@@ -3,6 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { ThemeProvider } from "next-themes";
 
 // Auth
 import { AuthProvider } from "@/contexts/AuthContext";
@@ -28,57 +29,71 @@ import NewQuotation from "./pages/NewQuotation";
 import DailyWork from "./pages/DailyWork";
 import Documents from "./pages/Documents";
 import Reports from "./pages/Reports";
+import Help from "./pages/Help";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 const queryClient = new QueryClient();
 
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <AuthProvider>
-          <Routes>
-            {/* Auth Route */}
-            <Route path="/auth" element={<Auth />} />
-            <Route path="/auth/callback" element={<AuthCallback />} />
-            
-            {/* Protected Routes */}
-            <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-            <Route path="/invoices" element={<ProtectedRoute><Invoices /></ProtectedRoute>} />
-            <Route path="/invoices/new" element={<ProtectedRoute><NewInvoice /></ProtectedRoute>} />
-            <Route path="/invoices/:id" element={<ProtectedRoute><InvoiceDetail /></ProtectedRoute>} />
-            <Route path="/clients" element={<ProtectedRoute><Clients /></ProtectedRoute>} />
-            <Route path="/clients/new" element={<ProtectedRoute><NewClient /></ProtectedRoute>} />
-            <Route path="/clients/:id" element={<ProtectedRoute><NotFound /></ProtectedRoute>} />
-            <Route path="/inventory" element={<ProtectedRoute><Inventory /></ProtectedRoute>} />
-            <Route path="/inventory/new" element={<ProtectedRoute><NewInventoryItem /></ProtectedRoute>} />
-            <Route path="/inventory/:id" element={<ProtectedRoute><NotFound /></ProtectedRoute>} />
-            <Route path="/more" element={<ProtectedRoute><More /></ProtectedRoute>} />
-            
-            {/* Secondary Pages */}
-            <Route path="/business-setup" element={<ProtectedRoute><BusinessSetup /></ProtectedRoute>} />
-            <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
-            
-            {/* Phase 4 routes */}
-            <Route path="/quotations" element={<ProtectedRoute><Quotations /></ProtectedRoute>} />
-            <Route path="/quotations/new" element={<ProtectedRoute><NewQuotation /></ProtectedRoute>} />
-            <Route path="/daily-work" element={<ProtectedRoute><DailyWork /></ProtectedRoute>} />
-            <Route path="/documents" element={<ProtectedRoute><Documents /></ProtectedRoute>} />
-            <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
-            <Route path="/help" element={<ProtectedRoute><NotFound /></ProtectedRoute>} />
-            
-            {/* Legacy auth routes */}
-            <Route path="/login" element={<Auth />} />
-            <Route path="/register" element={<Auth />} />
-            
-            {/* Catch-all */}
-            <Route path="*" element={<NotFound />} />
-          </Routes>
+  <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <AuthProvider>
+            <ErrorBoundary>
+              <Routes>
+              {/* Auth Route */}
+              <Route path="/auth" element={<Auth />} />
+              <Route path="/auth/callback" element={<AuthCallback />} />
+              
+              {/* Protected Routes */}
+              <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+              
+              {/* Invoice Routes */}
+              <Route path="/invoices" element={<ProtectedRoute><Invoices /></ProtectedRoute>} />
+              <Route path="/invoices/new" element={<ProtectedRoute><NewInvoice /></ProtectedRoute>} />
+              <Route path="/invoices/:id" element={<ProtectedRoute><InvoiceDetail /></ProtectedRoute>} />
+              <Route path="/invoices/:id/edit" element={<ProtectedRoute><NewInvoice /></ProtectedRoute>} />
+              
+              {/* Client Routes */}
+              <Route path="/clients" element={<ProtectedRoute><Clients /></ProtectedRoute>} />
+              <Route path="/clients/new" element={<ProtectedRoute><NewClient /></ProtectedRoute>} />
+              <Route path="/clients/:id" element={<ProtectedRoute><NewClient /></ProtectedRoute>} />
+              
+              {/* Inventory Routes */}
+              <Route path="/inventory" element={<ProtectedRoute><Inventory /></ProtectedRoute>} />
+              <Route path="/inventory/new" element={<ProtectedRoute><NewInventoryItem /></ProtectedRoute>} />
+              <Route path="/inventory/:id" element={<ProtectedRoute><NewInventoryItem /></ProtectedRoute>} />
+              
+              {/* Quotations Routes */}
+              <Route path="/quotations" element={<ProtectedRoute><Quotations /></ProtectedRoute>} />
+              <Route path="/quotations/new" element={<ProtectedRoute><NewQuotation /></ProtectedRoute>} />
+              <Route path="/quotations/:id/edit" element={<ProtectedRoute><NewQuotation /></ProtectedRoute>} />
+              
+              {/* Features & Utility Pages */}
+              <Route path="/daily-work" element={<ProtectedRoute><DailyWork /></ProtectedRoute>} />
+              <Route path="/documents" element={<ProtectedRoute><Documents /></ProtectedRoute>} />
+              <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
+              <Route path="/business-setup" element={<ProtectedRoute><BusinessSetup /></ProtectedRoute>} />
+              <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+              <Route path="/help" element={<ProtectedRoute><Help /></ProtectedRoute>} />
+              <Route path="/more" element={<ProtectedRoute><More /></ProtectedRoute>} />
+              
+              {/* Legacy auth routes */}
+              <Route path="/login" element={<Auth />} />
+              <Route path="/register" element={<Auth />} />
+              
+              {/* Catch-all */}
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </ErrorBoundary>
         </AuthProvider>
-      </BrowserRouter>
-    </TooltipProvider>
-  </QueryClientProvider>
+        </BrowserRouter>
+      </TooltipProvider>
+    </QueryClientProvider>
+  </ThemeProvider>
 );
 
 export default App;

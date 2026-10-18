@@ -8,6 +8,7 @@ import {
   HelpCircle, 
   LogOut,
   ChevronRight,
+  BarChart3,
   Building2
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -24,11 +25,12 @@ export default function More() {
 
   const menuItems = [
     { icon: FileText, label: "Quotations", description: "Manage your quotes", path: "/quotations" },
+    { icon: BarChart3, label: "Reports & Analytics", description: "Revenue and performance charts", path: "/reports" },
     { icon: Calendar, label: "Daily Work", description: "Tasks and reminders", path: "/daily-work" },
     { icon: FolderOpen, label: "Documents", description: "Stored invoices & quotes", path: "/documents" },
     { icon: Building2, label: "Business Profile", description: "Edit your business info", path: "/business-setup" },
-    { icon: Settings, label: "Settings", description: "App preferences", path: "/settings" },
-    { icon: HelpCircle, label: "Help & Support", description: "Get assistance", path: "/help" },
+    { icon: Settings, label: "Settings", description: "App preferences & backup", path: "/settings" },
+    { icon: HelpCircle, label: "Help & Support", description: "Get assistance & FAQs", path: "/help" },
   ];
 
   return (

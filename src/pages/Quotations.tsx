@@ -6,6 +6,13 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { 
   Search, 
   Plus, 
@@ -13,9 +20,18 @@ import {
   ArrowRight, 
   Loader2,
   Calendar,
-  User
+  User,
+  Eye,
+  Download,
+  Edit,
+  Trash2,
+  MoreVertical,
+  CheckCircle2,
+  Send
 } from 'lucide-react';
 import { useQuotations } from '@/hooks/useQuotations';
+import { useBusiness } from '@/hooks/useBusiness';
+import { downloadQuotationPDF, getQuotationPDFBlob } from '@/lib/pdf/generateQuotationPDF';
 import { format } from 'date-fns';
 
 const statusColors: Record<string, string> = {
@@ -27,18 +43,41 @@ const statusColors: Record<string, string> = {
   converted: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
 };
 
+const formatSafeDate = (dateVal: string | null | undefined, formatStr: string = 'dd MMM yyyy') => {
+  if (!dateVal) return '';
+  try {
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return dateVal;
+    return format(d, formatStr);
+  } catch {
+    return dateVal || '';
+  }
+};
+
 export default function Quotations() {
   const navigate = useNavigate();
-  const { quotations, isLoading, stats, convertToInvoice } = useQuotations();
+  const { 
+    quotations, 
+    quotationsWithItems, 
+    isLoading, 
+    stats, 
+    convertToInvoice, 
+    deleteQuotation, 
+    updateQuotation 
+  } = useQuotations();
+  const { business } = useBusiness();
+
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [convertingId, setConvertingId] = useState<string | null>(null);
 
-  const filteredQuotations = quotations.filter(quotation => {
-    const matchesSearch = 
-      quotation.quotation_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      quotation.client_name?.toLowerCase().includes(searchQuery.toLowerCase());
-    
+  const filteredQuotations = (quotations || []).filter(quotation => {
+    if (!quotation) return false;
+    const qNum = (quotation.quotation_number || '').toLowerCase();
+    const cName = (quotation.client_name || '').toLowerCase();
+    const query = (searchQuery || '').toLowerCase();
+
+    const matchesSearch = !query || qNum.includes(query) || cName.includes(query);
     const matchesStatus = statusFilter === 'all' || quotation.status === statusFilter;
     
     return matchesSearch && matchesStatus;
@@ -52,6 +91,28 @@ export default function Quotations() {
     } finally {
       setConvertingId(null);
     }
+  };
+
+  const handleViewPDF = async (id: string) => {
+    const quotation = quotationsWithItems.find(q => q.id === id) || quotations.find(q => q.id === id);
+    if (!quotation) return;
+    const blob = await getQuotationPDFBlob({ quotation: quotation as any, business });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+  };
+
+  const handleDownloadPDF = async (id: string) => {
+    const quotation = quotationsWithItems.find(q => q.id === id) || quotations.find(q => q.id === id);
+    if (!quotation) return;
+    await downloadQuotationPDF({ quotation: quotation as any, business });
+  };
+
+  const handleStatusChange = async (id: string, status: 'sent' | 'approved' | 'rejected') => {
+    await updateQuotation.mutateAsync({ id, status });
+  };
+
+  const handleDelete = async (id: string) => {
+    await deleteQuotation.mutateAsync(id);
   };
 
   return (
@@ -73,8 +134,8 @@ export default function Quotations() {
           </div>
         </div>
 
-        {/* Search and Filter */}
-        <div className="space-y-3 p-4">
+        {/* Search */}
+        <div className="p-4 pb-2">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -84,19 +145,22 @@ export default function Quotations() {
               className="pl-9"
             />
           </div>
-          
+        </div>
+
+        {/* Filter Tabs */}
+        <div className="px-4 pb-2">
           <Tabs value={statusFilter} onValueChange={setStatusFilter}>
             <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="all">All</TabsTrigger>
-              <TabsTrigger value="sent">Pending</TabsTrigger>
+              <TabsTrigger value="sent">Sent</TabsTrigger>
               <TabsTrigger value="approved">Approved</TabsTrigger>
-              <TabsTrigger value="expired">Expired</TabsTrigger>
+              <TabsTrigger value="draft">Draft</TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
 
-        {/* Quotation List */}
-        <div className="flex-1 space-y-3 p-4 pt-0">
+        {/* Quotations List */}
+        <div className="space-y-3 p-4 pb-24">
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -108,22 +172,25 @@ export default function Quotations() {
               </div>
               <h3 className="mb-1 text-lg font-medium">No quotations found</h3>
               <p className="mb-4 text-sm text-muted-foreground">
-                {searchQuery ? 'Try a different search term' : 'Create your first quotation'}
+                {searchQuery || statusFilter !== 'all'
+                  ? 'Try adjusting your search or filters'
+                  : 'Create your first quotation to get started'
+                }
               </p>
               <Button onClick={() => navigate('/quotations/new')}>
                 <Plus className="mr-2 h-4 w-4" />
-                New Quotation
+                Create Quotation
               </Button>
             </div>
           ) : (
             filteredQuotations.map((quotation) => (
-              <Card key={quotation.id} className="overflow-hidden">
+              <Card key={quotation.id} className="overflow-hidden transition-all hover:border-primary/40">
                 <CardContent className="p-0">
                   <div className="flex items-center justify-between p-4">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <p className="font-medium">{quotation.quotation_number}</p>
-                        <Badge className={statusColors[quotation.status]}>
+                        <Badge className={statusColors[quotation.status] || ''}>
                           {quotation.status}
                         </Badge>
                       </div>
@@ -133,37 +200,84 @@ export default function Quotations() {
                           <User className="h-3 w-3" />
                           {quotation.client_name || 'No client'}
                         </span>
-                        <span className="flex items-center gap-1">
-                          <Calendar className="h-3 w-3" />
-                          {format(new Date(quotation.quotation_date), 'dd MMM yyyy')}
-                        </span>
+                        {formatSafeDate(quotation.quotation_date) && (
+                          <span className="flex items-center gap-1">
+                            <Calendar className="h-3 w-3" />
+                            {formatSafeDate(quotation.quotation_date)}
+                          </span>
+                        )}
                       </div>
                       
-                      {quotation.valid_until && (
+                      {quotation.valid_until && formatSafeDate(quotation.valid_until) && (
                         <p className="mt-1 text-xs text-muted-foreground">
-                          Valid until: {format(new Date(quotation.valid_until), 'dd MMM yyyy')}
+                          Valid until: {formatSafeDate(quotation.valid_until)}
                         </p>
                       )}
                     </div>
                     
-                    <div className="text-right">
-                      <p className="text-lg font-semibold">₹{quotation.total_amount.toFixed(2)}</p>
-                      {quotation.status === 'approved' && !quotation.converted_invoice_id && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="mt-1"
-                          disabled={convertingId === quotation.id}
-                          onClick={() => handleConvertToInvoice(quotation.id)}
-                        >
-                          {convertingId === quotation.id ? (
-                            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                          ) : (
-                            <ArrowRight className="mr-1 h-3 w-3" />
+                    <div className="flex items-center gap-2">
+                      <div className="text-right">
+                        <p className="text-base font-semibold">₹{Number(quotation.total_amount || 0).toFixed(2)}</p>
+                        {quotation.status === 'approved' && !quotation.converted_invoice_id && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="mt-1 h-7 text-xs"
+                            disabled={convertingId === quotation.id}
+                            onClick={() => handleConvertToInvoice(quotation.id)}
+                          >
+                            {convertingId === quotation.id ? (
+                              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                            ) : (
+                              <ArrowRight className="mr-1 h-3 w-3" />
+                            )}
+                            Convert
+                          </Button>
+                        )}
+                      </div>
+
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => handleViewPDF(quotation.id)}>
+                            <Eye className="mr-2 h-4 w-4" />
+                            View PDF
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleDownloadPDF(quotation.id)}>
+                            <Download className="mr-2 h-4 w-4" />
+                            Download PDF
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => navigate(`/quotations/${quotation.id}/edit`)}>
+                            <Edit className="mr-2 h-4 w-4" />
+                            Edit Quotation
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          {quotation.status === 'draft' && (
+                            <DropdownMenuItem onClick={() => handleStatusChange(quotation.id, 'sent')}>
+                              <Send className="mr-2 h-4 w-4" />
+                              Mark as Sent
+                            </DropdownMenuItem>
                           )}
-                          Convert
-                        </Button>
-                      )}
+                          {quotation.status !== 'approved' && quotation.status !== 'converted' && (
+                            <DropdownMenuItem onClick={() => handleStatusChange(quotation.id, 'approved')}>
+                              <CheckCircle2 className="mr-2 h-4 w-4" />
+                              Mark as Approved
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem 
+                            className="text-destructive focus:text-destructive"
+                            onClick={() => handleDelete(quotation.id)}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </div>
                 </CardContent>
@@ -175,8 +289,8 @@ export default function Quotations() {
         {/* FAB */}
         <FloatingActionButton
           icon={<Plus className="h-6 w-6" />}
+          label="New Quote"
           onClick={() => navigate('/quotations/new')}
-          label="New Quotation"
         />
       </div>
     </AppLayout>

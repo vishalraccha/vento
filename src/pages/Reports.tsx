@@ -42,7 +42,7 @@ import {
   Cell,
   Legend,
 } from 'recharts';
-import { format, subMonths, startOfMonth, endOfMonth, isWithinInterval, parseISO } from 'date-fns';
+import { format, subMonths, startOfMonth, endOfMonth, isWithinInterval, parseISO, addMonths } from 'date-fns';
 
 const COLORS = ['#2563EB', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
 
@@ -92,7 +92,7 @@ export default function Reports() {
     while (current <= rangeEnd) {
       const key = format(current, 'MMM yyyy');
       months[key] = { month: format(current, 'MMM'), revenue: 0, paid: 0, pending: 0 };
-      current = new Date(current.setMonth(current.getMonth() + 1));
+      current = addMonths(current, 1);
     }
     
     // Aggregate invoice data
@@ -122,7 +122,7 @@ export default function Reports() {
     };
     
     filteredInvoices.forEach((inv) => {
-      if (breakdown.hasOwnProperty(inv.status)) {
+      if (inv.status in breakdown) {
         breakdown[inv.status as keyof typeof breakdown] += 1;
       }
     });

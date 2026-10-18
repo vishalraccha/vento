@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { FileText, Search, Filter, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useInvoices } from '@/hooks/useInvoices';
-import { format } from 'date-fns';
+import { formatSafeDate } from '@/lib/dateUtils';
 import { Invoice } from '@/types/database';
 
 export default function Invoices() {
@@ -22,10 +22,15 @@ export default function Invoices() {
       invoice.invoice_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (invoice.client_name?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false);
     
+    const total = Number(invoice.total_amount) || 0;
+    const paid = Number(invoice.amount_paid) || 0;
+    const isPaid = invoice.status === 'paid' || (paid >= total && total > 0);
+    const isOverdue = invoice.status === 'overdue' || (!isPaid && invoice.due_date && new Date(invoice.due_date) < new Date());
+
     if (activeTab === 'all') return matchesSearch;
-    if (activeTab === 'paid') return matchesSearch && invoice.status === 'paid';
-    if (activeTab === 'pending') return matchesSearch && ['draft', 'sent'].includes(invoice.status);
-    if (activeTab === 'overdue') return matchesSearch && invoice.status === 'overdue';
+    if (activeTab === 'paid') return matchesSearch && isPaid;
+    if (activeTab === 'pending') return matchesSearch && !isPaid;
+    if (activeTab === 'overdue') return matchesSearch && isOverdue;
     return matchesSearch;
   });
 
@@ -44,23 +49,47 @@ export default function Invoices() {
     );
   };
 
-  const InvoiceCard = ({ invoice }: { invoice: Invoice }) => (
-    <div
-      onClick={() => navigate(`/invoices/${invoice.id}`)}
-      className="flex cursor-pointer items-center justify-between rounded-lg border p-4 transition-colors hover:bg-muted/50"
-    >
-      <div className="space-y-1">
-        <p className="font-medium">{invoice.client_name || 'No client'}</p>
-        <p className="text-sm text-muted-foreground">
-          {invoice.invoice_number} • {format(new Date(invoice.invoice_date), 'dd MMM yyyy')}
-        </p>
+  const InvoiceCard = ({ invoice }: { invoice: Invoice }) => {
+    const total = Number(invoice.total_amount) || 0;
+    const paid = Number(invoice.amount_paid) || 0;
+    const balance = Math.max(0, total - paid);
+    const isPaid = invoice.status === 'paid' || (paid >= total && total > 0);
+
+    return (
+      <div
+        onClick={() => navigate(`/invoices/${invoice.id}`)}
+        className="flex cursor-pointer items-center justify-between rounded-lg border p-4 transition-colors hover:bg-muted/50"
+      >
+        <div className="space-y-1">
+          <p className="font-medium text-foreground">{invoice.client_name || 'Walk-in / Direct Client'}</p>
+          <p className="text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">{invoice.invoice_number}</span> • {formatSafeDate(invoice.invoice_date)}
+          </p>
+          {!isPaid && paid > 0 && (
+            <p className="text-xs text-emerald-600 font-medium">
+              ₹{paid.toLocaleString('en-IN')} paid of ₹{total.toLocaleString('en-IN')}
+            </p>
+          )}
+        </div>
+        <div className="text-right space-y-1">
+          <p className="font-semibold text-foreground">₹{total.toLocaleString('en-IN')}</p>
+          <div className="flex items-center justify-end gap-1.5">
+            {isPaid ? (
+              <Badge className="bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-200">
+                Paid
+              </Badge>
+            ) : paid > 0 ? (
+              <Badge variant="outline" className="bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 border-amber-200">
+                ₹{balance.toLocaleString('en-IN')} Due
+              </Badge>
+            ) : (
+              getStatusBadge(invoice.status)
+            )}
+          </div>
+        </div>
       </div>
-      <div className="text-right">
-        <p className="font-semibold">₹{Number(invoice.total_amount).toLocaleString('en-IN')}</p>
-        {getStatusBadge(invoice.status)}
-      </div>
-    </div>
-  );
+    );
+  };
 
   const EmptyState = () => (
     <div className="flex flex-col items-center justify-center py-16 text-center">

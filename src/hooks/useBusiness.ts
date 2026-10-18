@@ -17,13 +17,38 @@ export function useBusiness() {
     queryKey: ['businesses', user?.id],
     queryFn: async () => {
       if (!user) return null;
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('businesses')
         .select('*')
         .eq('user_id', user.id)
         .maybeSingle();
       
       if (error) throw error;
+
+      // Auto-provision a business profile row if one doesn't exist yet
+      if (!data) {
+        const { data: created, error: insertError } = await supabase
+          .from('businesses')
+          .insert({
+            user_id: user.id,
+            email: user.email,
+            business_name: 'My Business',
+            invoice_prefix: 'INV',
+            invoice_starting_number: 1,
+            current_invoice_number: 0,
+            quotation_prefix: 'QT',
+            quotation_starting_number: 1,
+            current_quotation_number: 0,
+            setup_completed: false,
+          })
+          .select()
+          .maybeSingle();
+        
+        if (!insertError && created) {
+          data = created;
+        }
+      }
+
       return data as Business | null;
     },
     enabled: !!user,
@@ -35,8 +60,10 @@ export function useBusiness() {
       
       const { data, error } = await supabase
         .from('businesses')
-        .update({ ...updates, updated_at: new Date().toISOString() })
-        .eq('user_id', user.id)
+        .upsert(
+          { user_id: user.id, ...updates, updated_at: new Date().toISOString() },
+          { onConflict: 'user_id' }
+        )
         .select()
         .maybeSingle();
       
@@ -45,6 +72,7 @@ export function useBusiness() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['businesses'] });
+      queryClient.invalidateQueries({ queryKey: ['business'] });
       toast({ title: 'Business profile updated successfully' });
     },
     onError: (error) => {
@@ -179,45 +207,65 @@ export function useBusiness() {
 
   // Increment invoice counter
   const incrementInvoiceNumber = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (targetNumber?: number) => {
       if (!user) throw new Error('Not authenticated');
       
-      const currentNum = businessQuery.data?.current_invoice_number || 0;
+      const { data: existing } = await supabase
+        .from('businesses')
+        .select('id, current_invoice_number')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      
+      const nextNum = targetNumber !== undefined 
+        ? Math.max(targetNumber, (existing?.current_invoice_number || 0))
+        : (existing?.current_invoice_number || 0) + 1;
       
       const { error } = await supabase
         .from('businesses')
-        .update({ 
-          current_invoice_number: currentNum + 1,
+        .upsert({ 
+          user_id: user.id,
+          current_invoice_number: nextNum,
           updated_at: new Date().toISOString() 
-        })
-        .eq('user_id', user.id);
+        }, { onConflict: 'user_id' });
       
       if (error) throw error;
+      return nextNum;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['businesses'] });
+      queryClient.invalidateQueries({ queryKey: ['business'] });
     },
   });
 
   // Increment quotation counter
   const incrementQuotationNumber = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (targetNumber?: number) => {
       if (!user) throw new Error('Not authenticated');
       
-      const currentNum = businessQuery.data?.current_quotation_number || 0;
+      const { data: existing } = await supabase
+        .from('businesses')
+        .select('id, current_quotation_number')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      
+      const nextNum = targetNumber !== undefined 
+        ? Math.max(targetNumber, (existing?.current_quotation_number || 0))
+        : (existing?.current_quotation_number || 0) + 1;
       
       const { error } = await supabase
         .from('businesses')
-        .update({ 
-          current_quotation_number: currentNum + 1,
+        .upsert({ 
+          user_id: user.id,
+          current_quotation_number: nextNum,
           updated_at: new Date().toISOString() 
-        })
-        .eq('user_id', user.id);
+        }, { onConflict: 'user_id' });
       
       if (error) throw error;
+      return nextNum;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['businesses'] });
+      queryClient.invalidateQueries({ queryKey: ['business'] });
     },
   });
 
